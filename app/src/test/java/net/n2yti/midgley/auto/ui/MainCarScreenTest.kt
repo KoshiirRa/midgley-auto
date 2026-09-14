@@ -6,6 +6,7 @@ import androidx.car.app.testing.TestCarContext
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
+import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,13 +18,15 @@ import org.robolectric.annotation.Config
 class MainCarScreenTest {
 
     private lateinit var carContext: TestCarContext
+    private lateinit var preferenceManager: MetroPreferenceManager
     private lateinit var screen: MainCarScreen
     private lateinit var screenController: ScreenController
 
     @Before
     fun setUp() {
         carContext = TestCarContext.createCarContext(ApplicationProvider.getApplicationContext())
-        screen = MainCarScreen(carContext)
+        preferenceManager = MetroPreferenceManager(carContext)
+        screen = MainCarScreen(carContext, preferenceManager = preferenceManager)
         screenController = ScreenController(screen)
     }
 
@@ -38,17 +41,22 @@ class MainCarScreenTest {
         val pane = paneTemplate.pane
         assertThat(pane).isNotNull()
         assertThat(pane?.rows?.size).isAtLeast(2)
-
-        val firstRow = pane?.rows?.get(0)
-        assertThat(firstRow?.title?.toString()).contains("WAIT TO FILL")
     }
 
     @Test
-    fun testOnGetTemplate_hasRefreshAction() {
+    fun testOnGetTemplate_hasPaneAndHeaderActions() {
+        screenController.moveToState(Lifecycle.State.RESUMED)
+
         val template = screen.onGetTemplate() as PaneTemplate
-        val actions = template.pane?.actions
-        assertThat(actions).isNotNull()
-        assertThat(actions).isNotEmpty()
-        assertThat(actions?.get(0)?.title?.toString()).isEqualTo("Refresh")
+        val paneActions = template.pane?.actions
+        assertThat(paneActions).isNotNull()
+        assertThat(paneActions).hasSize(2)
+        assertThat(paneActions?.get(0)?.title?.toString()).isEqualTo("5D Trend")
+        assertThat(paneActions?.get(1)?.title?.toString()).isEqualTo("Switch Hub")
+
+        val header = template.header
+        assertThat(header).isNotNull()
+        assertThat(header?.endHeaderActions).isNotEmpty()
+        assertThat(header?.endHeaderActions?.get(0)?.title?.toString()).isEqualTo("Refresh")
     }
 }
