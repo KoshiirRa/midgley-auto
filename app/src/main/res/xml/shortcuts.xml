@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <capability android:name="net.n2yti.midgley.auto.intent.GET_FUEL_ADVISOR">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.n2yti.midgley.auto"
+            android:targetClass="net.n2yti.midgley.auto.ui.MainActivity"
+            android:data="midgley://advisor">
+            <parameter
+                android:name="target_locale"
+                android:key="locale" />
+        </intent>
+    </capability>
+
+    <capability android:name="net.n2yti.midgley.auto.intent.GET_FUEL_FORECAST">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.n2yti.midgley.auto"
+            android:targetClass="net.n2yti.midgley.auto.ui.MainActivity"
+            android:data="midgley://forecast">
+            <parameter
+                android:name="target_locale"
+                android:key="locale" />
+        </intent>
+    </capability>
+
+    <shortcut
+        android:shortcutId="tulsa_advisor"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_dialog_info"
+        android:shortcutShortLabel="@string/shortcut_tulsa_short"
+        android:shortcutLongLabel="@string/shortcut_tulsa_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.n2yti.midgley.auto"
+            android:targetClass="net.n2yti.midgley.auto.ui.MainActivity"
+            android:data="midgley://advisor?locale=tulsa" />
+        <capability-binding android:key="net.n2yti.midgley.auto.intent.GET_FUEL_ADVISOR" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="general_advisor"
+        android:enabled="true"
+        android:icon="@android:drawable/ic_dialog_info"
+        android:shortcutShortLabel="@string/shortcut_general_short"
+        android:shortcutLongLabel="@string/shortcut_general_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.n2yti.midgley.auto"
+            android:targetClass="net.n2yti.midgley.auto.ui.MainActivity"
+            android:data="midgley://advisor" />
+        <capability-binding android:key="net.n2yti.midgley.auto.intent.GET_FUEL_ADVISOR" />
+    </shortcut>
+</shortcuts>

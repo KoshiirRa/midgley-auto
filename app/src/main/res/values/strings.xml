@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Midgley Auto</string>
+    <string name="shortcut_tulsa_short">Tulsa Forecast</string>
+    <string name="shortcut_tulsa_long">Check Tulsa Gas Price Recommendation</string>
+    <string name="shortcut_general_short">Fuel Advisor</string>
+    <string name="shortcut_general_long">Should I Fill Up Gas Today?</string>
+</resources>
