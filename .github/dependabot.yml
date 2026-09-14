@@ -1,11 +1,30 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
+# Dependabot Configuration for Midgley Auto (Android Automotive OS / Android Auto)
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Gradle Dependencies (AndroidX Car App Library, Compose, Kotlin, OkHttp, Retrofit)
+  - package-ecosystem: "gradle"
+    directory: "/"
     schedule:
       interval: "weekly"
+      day: "saturday"
+      time: "08:00"
+      timezone: "America/Chicago"
+    groups:
+      gradle-dependencies:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions Workflow Dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "saturday"
+      time: "08:00"
+      timezone: "America/Chicago"
+    groups:
+      actions-workflows:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
