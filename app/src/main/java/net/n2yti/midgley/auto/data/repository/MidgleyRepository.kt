@@ -10,6 +10,7 @@ import net.n2yti.midgley.auto.data.models.LocationResolveResponse
 import net.n2yti.midgley.auto.data.models.RecommendationCode
 import net.n2yti.midgley.auto.data.models.SavingsAdvisorResponse
 import net.n2yti.midgley.auto.data.obd.Obd2PidDecoder
+import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -17,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap
  * real-time OBD2 fuel telemetry shortfall fusion, and graceful fallback synthesis for vehicle head unit displays.
  */
 class MidgleyRepository(
-    private val apiService: MidgleyApiService = ApiClientFactory.createApiService()
+    private val customApiService: MidgleyApiService? = null,
+    private val preferenceManager: MetroPreferenceManager? = null
 ) {
 
     companion object {
@@ -36,6 +38,12 @@ class MidgleyRepository(
     private val advisorCache = ConcurrentHashMap<String, CachedEntry<SavingsAdvisorResponse>>()
     private val forecastCache = ConcurrentHashMap<String, CachedEntry<ForecastResponse>>()
     private val locationCache = ConcurrentHashMap<String, CachedEntry<LocationResolveResponse>>()
+
+    private fun getService(): MidgleyApiService {
+        if (customApiService != null) return customApiService
+        val baseUrl = preferenceManager?.getApiBaseUrl() ?: MetroPreferenceManager.DEFAULT_PROD_URL
+        return ApiClientFactory.createApiService(baseUrl = baseUrl)
+    }
 
     /**
      * Fetches unified price & forecast context with offline 6-hour caching,
@@ -58,7 +66,8 @@ class MidgleyRepository(
         }
 
         try {
-            val combined = apiService.getCombined(locale = locale, zipCode = zipCode)
+            val service = getService()
+            val combined = service.getCombined(locale = locale, zipCode = zipCode)
             val advisor = transformCombinedToAdvisor(combined, locale, tankCapacity, fuelLevelPct)
             advisorCache[cacheKey] = CachedEntry(advisor)
             emit(Resource.Success(advisor, isCached = false, cacheAgeHours = 0.0))
@@ -76,7 +85,7 @@ class MidgleyRepository(
                     )
                 )
             } else {
-                // Synthesize graceful offline fallback recommendation so in-dash head unit never crashes
+                // Synthesize graceful offline fallback recommendation based on known regional baseline
                 val fallback = generateOfflineFallbackAdvisor(locale, tankCapacity, fuelLevelPct)
                 emit(
                     Resource.Error(
@@ -102,7 +111,8 @@ class MidgleyRepository(
         }
 
         try {
-            val forecast = apiService.getForecast(locationId)
+            val service = getService()
+            val forecast = service.getForecast(locationId)
             forecastCache[locationId] = CachedEntry(forecast)
             emit(Resource.Success(forecast, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
@@ -125,7 +135,8 @@ class MidgleyRepository(
         }
 
         try {
-            val resolved = apiService.resolveLocation(lat, lon)
+            val service = getService()
+            val resolved = service.resolveLocation(lat, lon)
             locationCache[cacheKey] = CachedEntry(resolved)
             emit(Resource.Success(resolved))
         } catch (e: Exception) {
@@ -214,6 +225,16 @@ class MidgleyRepository(
         tankCapacity: Double,
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
+        val basePrice = when (locale.lowercase()) {
+            "oakland" -> 4.65
+            "port_st_lucie" -> 3.39
+            "newark" -> 3.25
+            "cincinnati" -> 3.19
+            "greenville", "charlotte" -> 3.15
+            "tulsa" -> 2.99
+            else -> 3.45
+        }
+
         val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
         val signal = if (isLowFuel) {
             "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP (Offline)"
@@ -227,8 +248,8 @@ class MidgleyRepository(
             displaySignal = signal,
             optimalDay = 0,
             optimalDate = if (isLowFuel) "Reserve Alert: Fill Up Now" else "Current Baseline",
-            currentPriceGal = 3.89,
-            targetPriceGal = 3.89,
+            currentPriceGal = basePrice,
+            targetPriceGal = basePrice,
             savingsPerGal = 0.0,
             netTankSavingsUsd = 0.0,
             confidenceLevel = "OFFLINE_ESTIMATE",

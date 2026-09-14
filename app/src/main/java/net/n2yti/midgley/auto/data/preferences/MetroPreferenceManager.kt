@@ -28,6 +28,7 @@ class MetroPreferenceManager(context: Context) {
         const val DEFAULT_TANK_CAPACITY = 15.0
         const val DEFAULT_ALERT_THRESHOLD = 4
         const val DEFAULT_FUEL_LEVEL_PCT = 45.0
+        const val DEFAULT_PROD_URL = "https://midgley.n2yti.net/api/v1/"
 
         val TANK_PRESETS = listOf(
             TankPreset("Compact / Hatchback", 12.0),
@@ -105,7 +106,7 @@ class MetroPreferenceManager(context: Context) {
     }
 
     fun getApiBaseUrl(): String {
-        return prefs.getString(KEY_API_BASE_URL, BuildConfig.BASE_URL) ?: BuildConfig.BASE_URL
+        return prefs.getString(KEY_API_BASE_URL, DEFAULT_PROD_URL) ?: DEFAULT_PROD_URL
     }
 
     fun setApiBaseUrl(url: String) {

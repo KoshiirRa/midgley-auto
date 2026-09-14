@@ -1,6 +1,7 @@
 package net.n2yti.midgley.auto.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,24 +9,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,15 +43,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import net.n2yti.midgley.auto.data.models.RecommendationCode
+import net.n2yti.midgley.auto.data.models.SavingsAdvisorResponse
 import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
+import net.n2yti.midgley.auto.data.repository.MidgleyRepository
+import net.n2yti.midgley.auto.data.repository.Resource
 
 /**
- * Jetpack Compose Phone Companion App Settings & Telemetry Dashboard.
+ * Jetpack Compose Phone Companion App Settings & Live Telemetry Dashboard.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CompanionSettingsScreen(
     preferenceManager: MetroPreferenceManager,
+    repository: MidgleyRepository = remember { MidgleyRepository(preferenceManager = preferenceManager) },
     modifier: Modifier = Modifier
 ) {
     var selectedLocale by remember { mutableStateOf(preferenceManager.getSelectedLocale()) }
@@ -60,14 +71,33 @@ fun CompanionSettingsScreen(
     var simulatedObd2 by remember { mutableStateOf(preferenceManager.isSimulatedObd2()) }
     var fuelLevelPct by remember { mutableDoubleStateOf(preferenceManager.getLastKnownFuelLevelPct()) }
 
+    var advisorState by remember { mutableStateOf<Resource<SavingsAdvisorResponse>>(Resource.Loading()) }
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+
     val remainingGallons = (fuelLevelPct / 100.0) * tankCapacity
     val gallonsNeeded = (tankCapacity - remainingGallons).coerceAtLeast(0.0)
-    val simulatedSavings = gallonsNeeded * 0.17
+
+    // Dynamic Live Price & Advisor Fetch on region / tank / fuel change
+    LaunchedEffect(selectedLocale, tankCapacity, fuelLevelPct, obd2Enabled, apiBaseUrl, refreshTrigger) {
+        val effectiveFuelPct = if (obd2Enabled) fuelLevelPct else null
+        repository.getUnifiedAdvisor(
+            locale = selectedLocale,
+            tankCapacity = tankCapacity,
+            fuelLevelPct = effectiveFuelPct
+        ).collect { resource ->
+            advisorState = resource
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Midgley Gas Advisor") },
+                actions = {
+                    IconButton(onClick = { refreshTrigger++ }) {
+                        Text("🔄", style = MaterialTheme.typography.titleMedium)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -83,34 +113,83 @@ fun CompanionSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Live Savings Simulator Card
+            // 1. Live Regional Gas Price & Advisor Card
             item {
+                val advisorData = advisorState.data
+                val isDataLoading = advisorState is Resource.Loading && advisorData == null
+                val displayName = preferenceManager.getDisplayName(selectedLocale)
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        containerColor = when (advisorData?.recommendationCode) {
+                            RecommendationCode.WAIT_TO_FILL -> MaterialTheme.colorScheme.primaryContainer
+                            RecommendationCode.FILL_NOW -> MaterialTheme.colorScheme.errorContainer
+                            else -> MaterialTheme.colorScheme.secondaryContainer
+                        }
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "💡 Dynamic Fill-Up Savings Simulator",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Based on a 17¢/gal price drop on a %.1f gal shortfall:".format(gallonsNeeded),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Estimated Net Savings: $%.2f".format(simulatedSavings),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "📍 $displayName",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isAutoDetect) "Mode: Auto-Detect (GPS)" else "Mode: Manual Lock",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isDataLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        if (advisorData != null) {
+                            Text(
+                                text = advisorData.displaySignal,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Current Price: $%.2f/gal • Target: $%.2f/gal".format(
+                                    advisorData.currentPriceGal,
+                                    advisorData.targetPriceGal
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = advisorData.optimalDate,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            if (advisorData.savingsPerGal > 0.0) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Estimated Net Savings: $%.2f (~$%.2f/gal on %.1f gal shortfall)".format(
+                                        advisorData.netTankSavingsUsd,
+                                        advisorData.savingsPerGal,
+                                        gallonsNeeded
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            Text("Fetching live regional prices from Midgley Gateway...")
+                        }
                     }
                 }
             }
@@ -155,7 +234,7 @@ fun CompanionSettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Simulate OBD2 (Demo / Emulator)")
+                                Text("Simulate OBD2 (Demo / Testing)")
                                 Switch(
                                     checked = simulatedObd2,
                                     onCheckedChange = {
@@ -397,17 +476,6 @@ fun CompanionSettingsScreen(
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
-                                selected = apiBaseUrl.contains("10.42.42.54"),
-                                onClick = {
-                                    apiBaseUrl = "http://10.42.42.54:8000/api/v1/"
-                                    preferenceManager.setApiBaseUrl(apiBaseUrl)
-                                }
-                            )
-                            Text("Dev VM (10.42.42.54:8000)")
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(
                                 selected = apiBaseUrl.contains("midgley.n2yti.net"),
                                 onClick = {
                                     apiBaseUrl = "https://midgley.n2yti.net/api/v1/"
@@ -415,6 +483,17 @@ fun CompanionSettingsScreen(
                                 }
                             )
                             Text("Production (midgley.n2yti.net)")
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = apiBaseUrl.contains("10.42.42.54"),
+                                onClick = {
+                                    apiBaseUrl = "http://10.42.42.54:8000/api/v1/"
+                                    preferenceManager.setApiBaseUrl(apiBaseUrl)
+                                }
+                            )
+                            Text("Dev VM (10.42.42.54:8000)")
                         }
                     }
                 }

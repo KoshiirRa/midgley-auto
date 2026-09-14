@@ -31,7 +31,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable = true
-            buildConfigField("String", "BASE_URL", "\"http://10.42.42.54:8000/api/v1/\"")
+            buildConfigField("String", "BASE_URL", "\"https://midgley.n2yti.net/api/v1/\"")
         }
     }
     compileOptions {
