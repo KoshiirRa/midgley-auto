@@ -9,3 +9,4 @@
 *.ap_
 *.apk
 *.aab
+.kotlin/
