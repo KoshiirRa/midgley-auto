@@ -1,5 +1,7 @@
 package net.n2yti.midgley.auto.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -98,7 +100,17 @@ fun CompanionSettingsScreen(
     var fuelLevelPct by remember { mutableDoubleStateOf(preferenceManager.getLastKnownFuelLevelPct()) }
 
     var activeThemeMode by remember { mutableStateOf(currentThemeMode) }
+    var hasPermissions by remember { mutableStateOf(bleManager.hasRequiredBluetoothPermissions()) }
     var pairedDevices by remember { mutableStateOf(bleManager.getPairedDevices()) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        hasPermissions = results.values.all { it }
+        if (hasPermissions) {
+            pairedDevices = bleManager.getPairedDevices()
+        }
+    }
 
     var advisorState by remember { mutableStateOf<Resource<SavingsAdvisorResponse>>(Resource.Loading()) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
@@ -133,7 +145,10 @@ fun CompanionSettingsScreen(
                 actions = {
                     IconButton(onClick = {
                         refreshTrigger++
-                        pairedDevices = bleManager.getPairedDevices()
+                        hasPermissions = bleManager.hasRequiredBluetoothPermissions()
+                        if (hasPermissions) {
+                            pairedDevices = bleManager.getPairedDevices()
+                        }
                     }) {
                         Text("🔄", style = MaterialTheme.typography.titleMedium)
                     }
@@ -321,7 +336,14 @@ fun CompanionSettingsScreen(
                                 onCheckedChange = {
                                     obd2Enabled = it
                                     preferenceManager.setObd2Enabled(it)
-                                    if (!it) {
+                                    if (it) {
+                                        if (!bleManager.hasRequiredBluetoothPermissions()) {
+                                            permissionLauncher.launch(bleManager.getRequiredBluetoothPermissions())
+                                        } else {
+                                            hasPermissions = true
+                                            pairedDevices = bleManager.getPairedDevices()
+                                        }
+                                    } else {
                                         bleManager.disconnect()
                                     }
                                 }
@@ -330,6 +352,42 @@ fun CompanionSettingsScreen(
 
                         if (obd2Enabled) {
                             Spacer(modifier = Modifier.height(12.dp))
+
+                            // Permission Warning Banner if permissions not granted
+                            if (!hasPermissions) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = "🔑 Bluetooth Permissions Required",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Text(
+                                            text = "Bluetooth and location permissions are required to scan for and connect to OBD-II adapters.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = {
+                                                permissionLauncher.launch(bleManager.getRequiredBluetoothPermissions())
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                                contentColor = MaterialTheme.colorScheme.onTertiary
+                                            )
+                                        ) {
+                                            Text("Grant Bluetooth Permissions", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
 
                             // Live Connection Status Banner
                             Surface(
@@ -422,7 +480,14 @@ fun CompanionSettingsScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 OutlinedButton(
-                                    onClick = { pairedDevices = bleManager.getPairedDevices() }
+                                    onClick = {
+                                        if (!bleManager.hasRequiredBluetoothPermissions()) {
+                                            permissionLauncher.launch(bleManager.getRequiredBluetoothPermissions())
+                                        } else {
+                                            hasPermissions = true
+                                            pairedDevices = bleManager.getPairedDevices()
+                                        }
+                                    }
                                 ) {
                                     Text("Refresh", fontSize = 12.sp)
                                 }
@@ -463,8 +528,13 @@ fun CompanionSettingsScreen(
                                                 } else {
                                                     Button(
                                                         onClick = {
-                                                            preferenceManager.setLastObd2Address(device.address)
-                                                            bleManager.connectToPairedDevice(device.address, tankCapacity)
+                                                            if (!bleManager.hasRequiredBluetoothPermissions()) {
+                                                                permissionLauncher.launch(bleManager.getRequiredBluetoothPermissions())
+                                                            } else {
+                                                                hasPermissions = true
+                                                                preferenceManager.setLastObd2Address(device.address)
+                                                                bleManager.connectToPairedDevice(device.address, tankCapacity)
+                                                            }
                                                         }
                                                     ) {
                                                         Text("Connect", fontSize = 12.sp)
@@ -493,7 +563,16 @@ fun CompanionSettingsScreen(
                                         Text("Stop Scan", fontSize = 12.sp)
                                     }
                                 } else {
-                                    OutlinedButton(onClick = { bleManager.startScan(tankCapacity) }) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (!bleManager.hasRequiredBluetoothPermissions()) {
+                                                permissionLauncher.launch(bleManager.getRequiredBluetoothPermissions())
+                                            } else {
+                                                hasPermissions = true
+                                                bleManager.startScan(tankCapacity)
+                                            }
+                                        }
+                                    ) {
                                         Text("Scan BLE", fontSize = 12.sp)
                                     }
                                 }

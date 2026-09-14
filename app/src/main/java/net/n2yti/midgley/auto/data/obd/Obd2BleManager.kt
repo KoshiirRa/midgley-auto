@@ -1,5 +1,6 @@
 package net.n2yti.midgley.auto.data.obd
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -14,8 +15,11 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -91,8 +95,36 @@ class Obd2BleManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val responseBuffer = StringBuilder()
 
+    /**
+     * Returns the array of required runtime permissions for Bluetooth/BLE operations on the current Android version.
+     */
+    fun getRequiredBluetoothPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        }
+    }
+
+    /**
+     * Checks whether all required Bluetooth / Location runtime permissions have been granted.
+     */
+    fun hasRequiredBluetoothPermissions(): Boolean {
+        val permissions = getRequiredBluetoothPermissions()
+        return permissions.all { perm ->
+            ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
     @SuppressLint("MissingPermission")
     fun getPairedDevices(): List<Obd2DeviceInfo> {
+        if (!hasRequiredBluetoothPermissions()) return emptyList()
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return emptyList()
         return try {
             bluetoothAdapter.bondedDevices?.map { device ->
@@ -115,6 +147,11 @@ class Obd2BleManager(
     fun connectToPairedDevice(address: String, tankCapacityGallons: Double = 15.0) {
         currentTankCapacity = tankCapacityGallons
         disconnect()
+
+        if (!hasRequiredBluetoothPermissions()) {
+            _connectionState.value = Obd2ConnectionState.Error("Bluetooth permissions required to connect")
+            return
+        }
 
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
@@ -295,6 +332,12 @@ class Obd2BleManager(
     @SuppressLint("MissingPermission")
     fun startScan(tankCapacityGallons: Double = 15.0) {
         currentTankCapacity = tankCapacityGallons
+
+        if (!hasRequiredBluetoothPermissions()) {
+            _connectionState.value = Obd2ConnectionState.Error("Bluetooth permissions required to scan devices")
+            return
+        }
+
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
             _connectionState.value = Obd2ConnectionState.Error("Bluetooth is disabled or unavailable")
             return
@@ -334,6 +377,11 @@ class Obd2BleManager(
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice) {
+        if (!hasRequiredBluetoothPermissions()) {
+            _connectionState.value = Obd2ConnectionState.Error("Bluetooth permissions required to connect")
+            return
+        }
+
         try {
             val name = try { device.name ?: "OBD2 Device" } catch (_: SecurityException) { "OBD2 Device" }
             _connectionState.value = Obd2ConnectionState.Connecting(name)
