@@ -36,7 +36,12 @@ class MidgleyApiServiceTest {
             {
                 "status": "success",
                 "timestamp": "2026-09-14T05:00:00Z",
-                "locale": "tulsa",
+                "locale": {
+                    "code": "tulsa",
+                    "region_id": "Tulsa_OK",
+                    "name": "Tulsa Metro Area, OK",
+                    "padd_region": "PADD 2 Midwest"
+                },
                 "live_lookup": {
                     "current_price_per_gal": 3.89,
                     "source": "GasBuddy",
@@ -47,13 +52,16 @@ class MidgleyApiServiceTest {
                 "forecast": {
                     "current_base_price": 3.89,
                     "predicted_price_per_gal": 3.79,
-                    "direction": "DOWN",
-                    "expected_change_cents": -10.0,
+                    "projected_direction": "DOWN",
+                    "expected_change_dollars": 0.10,
                     "day_3_price": 3.79
                 },
                 "key_drivers": [
-                    "West Tulsa Refinery Online",
-                    "Cushing Crude Storage +1.2M bbl"
+                    {
+                        "category": "Refining",
+                        "description": "West Tulsa Refinery Online",
+                        "impact_score": 0.12
+                    }
                 ]
             }
         """.trimIndent()
@@ -67,10 +75,11 @@ class MidgleyApiServiceTest {
 
         val response = apiService.getCombined(locale = "tulsa")
         assertThat(response.status).isEqualTo("success")
-        assertThat(response.locale).isEqualTo("tulsa")
+        assertThat(response.locale?.code).isEqualTo("tulsa")
         assertThat(response.liveLookup?.currentPricePerGal).isEqualTo(3.89)
         assertThat(response.forecast?.day3Price).isEqualTo(3.79)
-        assertThat(response.keyDrivers).hasSize(2)
+        assertThat(response.keyDrivers).hasSize(1)
+        assertThat(response.keyDrivers[0].description).contains("West Tulsa")
     }
 
     @Test

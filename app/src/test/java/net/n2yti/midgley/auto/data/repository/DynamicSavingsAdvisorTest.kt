@@ -2,7 +2,9 @@ package net.n2yti.midgley.auto.data.repository
 
 import net.n2yti.midgley.auto.data.models.CombinedApiResponse
 import net.n2yti.midgley.auto.data.models.ForecastPayload
+import net.n2yti.midgley.auto.data.models.KeyDriver
 import net.n2yti.midgley.auto.data.models.LiveLookup
+import net.n2yti.midgley.auto.data.models.LocaleInfo
 import net.n2yti.midgley.auto.data.models.RecommendationCode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -14,9 +16,9 @@ class DynamicSavingsAdvisorTest {
 
     private fun createCombinedResponse(currentPrice: Double, day3Price: Double): CombinedApiResponse {
         return CombinedApiResponse(
-            status = "ok",
+            status = "success",
             timestamp = "2026-09-14T10:00:00Z",
-            locale = "tulsa",
+            locale = LocaleInfo(code = "tulsa", name = "Tulsa Metro"),
             liveLookup = LiveLookup(
                 currentPricePerGal = currentPrice,
                 source = "LIVE_HUB_FEED"
@@ -24,15 +26,15 @@ class DynamicSavingsAdvisorTest {
             forecast = ForecastPayload(
                 currentBasePrice = currentPrice,
                 predictedPricePerGal = day3Price,
-                direction = if (day3Price < currentPrice) "FALLING" else "RISING",
-                expectedChangeCents = (day3Price - currentPrice) * 100.0,
+                projectedDirection = if (day3Price < currentPrice) "DOWN" else "UP",
+                expectedChangeDollars = Math.abs(day3Price - currentPrice),
                 day1Price = currentPrice - 0.05,
                 day2Price = currentPrice - 0.10,
                 day3Price = day3Price,
                 day4Price = day3Price + 0.02,
                 day5Price = day3Price + 0.05
             ),
-            keyDrivers = listOf("OPEC supply surge", "Refinery operations normal")
+            keyDrivers = listOf(KeyDriver(category = "Geopolitical", description = "OPEC supply surge", impactScore = 0.12))
         )
     }
 

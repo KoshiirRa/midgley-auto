@@ -476,13 +476,13 @@ fun CompanionSettingsScreen(
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
-                                selected = apiBaseUrl.contains("midgley.n2yti.net"),
+                                selected = apiBaseUrl.contains("local-dev.dwarvenbard.com"),
                                 onClick = {
-                                    apiBaseUrl = "https://midgley.n2yti.net/api/v1/"
+                                    apiBaseUrl = "https://local-dev.dwarvenbard.com/api/v1/"
                                     preferenceManager.setApiBaseUrl(apiBaseUrl)
                                 }
                             )
-                            Text("Production (midgley.n2yti.net)")
+                            Text("Production (local-dev.dwarvenbard.com)")
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {

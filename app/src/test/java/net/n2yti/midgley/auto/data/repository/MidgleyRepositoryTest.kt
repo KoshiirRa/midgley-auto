@@ -39,7 +39,11 @@ class MidgleyRepositoryTest {
             {
                 "status": "success",
                 "timestamp": "2026-09-14T05:00:00Z",
-                "locale": "tulsa",
+                "locale": {
+                    "code": "tulsa",
+                    "region_id": "Tulsa_OK",
+                    "name": "Tulsa Metro Area, OK"
+                },
                 "live_lookup": {
                     "current_price_per_gal": 3.89
                 },

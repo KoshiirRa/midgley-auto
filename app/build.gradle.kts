@@ -26,12 +26,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            buildConfigField("String", "BASE_URL", "\"https://midgley.n2yti.net/api/v1/\"")
+            buildConfigField("String", "BASE_URL", "\"https://local-dev.dwarvenbard.com/api/v1/\"")
         }
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable = true
-            buildConfigField("String", "BASE_URL", "\"https://midgley.n2yti.net/api/v1/\"")
+            buildConfigField("String", "BASE_URL", "\"https://local-dev.dwarvenbard.com/api/v1/\"")
         }
     }
     compileOptions {
