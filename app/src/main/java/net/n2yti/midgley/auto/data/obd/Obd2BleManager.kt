@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothSocket
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
@@ -17,22 +18,36 @@ import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
 import java.util.UUID
 
 sealed class Obd2ConnectionState {
     object Disconnected : Obd2ConnectionState()
     object Scanning : Obd2ConnectionState()
     data class Connecting(val deviceName: String) : Obd2ConnectionState()
-    data class Connected(val deviceName: String, val address: String) : Obd2ConnectionState()
+    data class Connected(val deviceName: String, val address: String, val protocol: String = "BLE") : Obd2ConnectionState()
     data class Error(val message: String) : Obd2ConnectionState()
 }
 
+data class Obd2DeviceInfo(
+    val name: String,
+    val address: String,
+    val isBonded: Boolean = true,
+    val type: String = "Classic SPP"
+)
+
 /**
- * Manages Bluetooth Low Energy (BLE) peripheral discovery, GATT connection,
- * and periodic Mode 01 PID 0x2F fuel level polling for vehicle OBD2 dongles.
+ * Manages dual-mode Bluetooth (Classic SPP RFCOMM & BLE GATT) discovery,
+ * connection lifecycle, and periodic Mode 01 PID 0x2F fuel level polling.
  */
 class Obd2BleManager(
     private val context: Context,
@@ -40,7 +55,10 @@ class Obd2BleManager(
 ) {
 
     companion object {
-        // Standard BLE GATT UUIDs used across ELM327 / STN / OBD2 adapters
+        // Standard SPP (Serial Port Profile) UUID for Bluetooth Classic ELM327 adapters
+        val UUID_SPP: UUID = UUID.fromString("00001101-0000-1000-8000-00805f9b34fb")
+
+        // Standard BLE GATT UUIDs
         val UUID_NORDIC_UART_SERVICE: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         val UUID_NORDIC_TX_CHAR: UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
         val UUID_NORDIC_RX_CHAR: UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
@@ -50,8 +68,8 @@ class Obd2BleManager(
         val UUID_CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
         private const val SCAN_TIMEOUT_MILLIS = 15000L
-        private val KNOWN_OBD_NAME_PREFIXES = listOf(
-            "OBD", "VEEPEAK", "VGATE", "OBDLINK", "IOS-VLINK", "CAR_OBD", "KONNWEI", "LELINK"
+        val KNOWN_OBD_NAME_PREFIXES = listOf(
+            "OBD", "VEEPEAK", "VGATE", "OBDLINK", "IOS-VLINK", "CAR_OBD", "KONNWEI", "LELINK", "BAFX", "VIEOCAR"
         )
     }
 
@@ -66,10 +84,128 @@ class Obd2BleManager(
 
     private var activeGatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
+    private var classicSocket: BluetoothSocket? = null
+    private var classicJob: Job? = null
     private var currentTankCapacity: Double = 15.0
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val responseBuffer = StringBuilder()
+
+    @SuppressLint("MissingPermission")
+    fun getPairedDevices(): List<Obd2DeviceInfo> {
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return emptyList()
+        return try {
+            bluetoothAdapter.bondedDevices?.map { device ->
+                val name = device.name ?: "Unknown OBD Device"
+                val type = when (device.type) {
+                    BluetoothDevice.DEVICE_TYPE_LE -> "BLE"
+                    BluetoothDevice.DEVICE_TYPE_DUAL -> "Dual (Classic/BLE)"
+                    else -> "Classic SPP"
+                }
+                Obd2DeviceInfo(name, device.address, isBonded = true, type = type)
+            }?.sortedByDescending { device ->
+                KNOWN_OBD_NAME_PREFIXES.any { prefix -> device.name.uppercase().contains(prefix) }
+            } ?: emptyList()
+        } catch (e: SecurityException) {
+            emptyList()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun connectToPairedDevice(address: String, tankCapacityGallons: Double = 15.0) {
+        currentTankCapacity = tankCapacityGallons
+        disconnect()
+
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            _connectionState.value = Obd2ConnectionState.Error("Bluetooth is disabled")
+            return
+        }
+
+        val device = try {
+            adapter.getRemoteDevice(address)
+        } catch (e: Exception) {
+            _connectionState.value = Obd2ConnectionState.Error("Invalid device address: ${e.message}")
+            return
+        }
+
+        if (device == null) {
+            _connectionState.value = Obd2ConnectionState.Error("Device not found")
+            return
+        }
+
+        val deviceName = try { device.name ?: "OBD2 Device" } catch (_: SecurityException) { "OBD2 Device" }
+
+        // Route BLE-only devices to GATT connection
+        if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
+            connectToDevice(device)
+            return
+        }
+
+        _connectionState.value = Obd2ConnectionState.Connecting(deviceName)
+
+        classicJob = coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val socket = try {
+                    device.createRfcommSocketToServiceRecord(UUID_SPP)
+                } catch (e: Exception) {
+                    device.createInsecureRfcommSocketToServiceRecord(UUID_SPP)
+                }
+
+                socket.connect()
+                classicSocket = socket
+
+                _connectionState.value = Obd2ConnectionState.Connected(deviceName, address, "Bluetooth Classic SPP")
+
+                val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.US_ASCII))
+                val writer = OutputStreamWriter(socket.outputStream, Charsets.US_ASCII)
+
+                // ELM327 Init Sequence
+                val initCommands = listOf("ATZ\r", "ATE0\r", "ATL0\r", "ATH0\r", "ATSP0\r")
+                for (cmd in initCommands) {
+                    if (!socket.isConnected || !isActive) break
+                    writer.write(cmd)
+                    writer.flush()
+                    delay(300)
+                    while (socket.inputStream.available() > 0) {
+                        reader.readLine()
+                    }
+                }
+
+                // Periodic Mode 01 PID 2F Loop
+                while (isActive && socket.isConnected) {
+                    writer.write("012F\r")
+                    writer.flush()
+                    delay(500)
+
+                    val responseBuilder = StringBuilder()
+                    var attempts = 0
+                    while (attempts < 15 && !responseBuilder.contains(">")) {
+                        if (socket.inputStream.available() > 0) {
+                            val ch = socket.inputStream.read()
+                            if (ch != -1) {
+                                responseBuilder.append(ch.toChar())
+                            }
+                        } else {
+                            delay(100)
+                            attempts++
+                        }
+                    }
+
+                    val rawResponse = responseBuilder.toString()
+                    val telemetry = Obd2PidDecoder.decodeFuelLevelResponse(rawResponse, currentTankCapacity)
+                    if (telemetry != null) {
+                        _latestTelemetry.value = telemetry
+                    }
+
+                    delay(15000L) // Poll every 15s
+                }
+            } catch (e: Exception) {
+                _connectionState.value = Obd2ConnectionState.Error(e.localizedMessage ?: "Connection closed")
+                disconnect()
+            }
+        }
+    }
 
     private val scanCallback = object : ScanCallback() {
         @SuppressLint("MissingPermission")
@@ -92,9 +228,9 @@ class Obd2BleManager(
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                val name = try { gatt?.device?.name ?: "OBD2 Dongle" } catch (_: SecurityException) { "OBD2 Dongle" }
+                val name = try { gatt?.device?.name ?: "BLE OBD2 Dongle" } catch (_: SecurityException) { "BLE OBD2 Dongle" }
                 val address = gatt?.device?.address ?: "00:00:00:00:00:00"
-                _connectionState.value = Obd2ConnectionState.Connected(name, address)
+                _connectionState.value = Obd2ConnectionState.Connected(name, address, "BLE GATT")
                 gatt?.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 _connectionState.value = Obd2ConnectionState.Disconnected
@@ -110,14 +246,12 @@ class Obd2BleManager(
 
             var readChar: BluetoothGattCharacteristic? = null
 
-            // Check Nordic UART service
             val nordicService = gatt.getService(UUID_NORDIC_UART_SERVICE)
             if (nordicService != null) {
                 writeCharacteristic = nordicService.getCharacteristic(UUID_NORDIC_TX_CHAR)
                 readChar = nordicService.getCharacteristic(UUID_NORDIC_RX_CHAR)
             }
 
-            // Check Generic FFE0 service fallback
             if (writeCharacteristic == null) {
                 val genericService = gatt.getService(UUID_GENERIC_SERVICE)
                 if (genericService != null) {
@@ -127,7 +261,6 @@ class Obd2BleManager(
                 }
             }
 
-            // Enable notifications on receive characteristic
             readChar?.let { characteristic ->
                 gatt.setCharacteristicNotification(characteristic, true)
                 val descriptor = characteristic.getDescriptor(UUID_CCCD)
@@ -137,7 +270,6 @@ class Obd2BleManager(
                 }
             }
 
-            // Send initial Mode 01 PID 2F fuel level query
             mainHandler.postDelayed({ queryFuelLevel() }, 1000L)
         }
 
@@ -160,9 +292,6 @@ class Obd2BleManager(
         }
     }
 
-    /**
-     * Starts BLE scanning for nearby supported OBD2 peripherals.
-     */
     @SuppressLint("MissingPermission")
     fun startScan(tankCapacityGallons: Double = 15.0) {
         currentTankCapacity = tankCapacityGallons
@@ -185,7 +314,6 @@ class Obd2BleManager(
             _connectionState.value = Obd2ConnectionState.Scanning
             scanner.startScan(null, settings, scanCallback)
 
-            // Auto timeout scan after 15s to save battery
             mainHandler.postDelayed({
                 if (_connectionState.value == Obd2ConnectionState.Scanning) {
                     stopScan()
@@ -197,9 +325,6 @@ class Obd2BleManager(
         }
     }
 
-    /**
-     * Stops any in-progress BLE scanning.
-     */
     @SuppressLint("MissingPermission")
     fun stopScan() {
         try {
@@ -218,9 +343,6 @@ class Obd2BleManager(
         }
     }
 
-    /**
-     * Transmits Mode 01 PID 0x2F query over GATT write characteristic.
-     */
     @SuppressLint("MissingPermission")
     fun queryFuelLevel() {
         val gatt = activeGatt ?: return
@@ -232,24 +354,25 @@ class Obd2BleManager(
         } catch (_: SecurityException) {}
     }
 
-    /**
-     * Injects synthetic telemetry for testing, demos, or DHU emulator runs.
-     */
     fun injectSimulatedTelemetry(
         fuelPercent: Double = 35.0,
         tankCapacityGallons: Double = 15.0
     ) {
         currentTankCapacity = tankCapacityGallons
-        _connectionState.value = Obd2ConnectionState.Connected("Simulated OBD2", "DEMO:00:11:22:33")
+        _connectionState.value = Obd2ConnectionState.Connected("Simulated OBD2", "DEMO:00:11:22:33", "Virtual Driver")
         _latestTelemetry.value = Obd2PidDecoder.createSimulatedTelemetry(fuelPercent, tankCapacityGallons)
     }
 
-    /**
-     * Cleans up and disconnects active GATT connection.
-     */
     @SuppressLint("MissingPermission")
     fun disconnect() {
         stopScan()
+        classicJob?.cancel()
+        classicJob = null
+        try {
+            classicSocket?.close()
+        } catch (_: Exception) {}
+        classicSocket = null
+
         try {
             activeGatt?.disconnect()
             activeGatt?.close()

@@ -1,7 +1,11 @@
 package net.n2yti.midgley.auto.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,25 +15,34 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,25 +51,40 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import net.n2yti.midgley.auto.data.models.RecommendationCode
 import net.n2yti.midgley.auto.data.models.SavingsAdvisorResponse
+import net.n2yti.midgley.auto.data.obd.Obd2BleManager
+import net.n2yti.midgley.auto.data.obd.Obd2ConnectionState
 import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
+import net.n2yti.midgley.auto.data.preferences.ThemeMode
 import net.n2yti.midgley.auto.data.repository.MidgleyRepository
 import net.n2yti.midgley.auto.data.repository.Resource
 
 /**
  * Jetpack Compose Phone Companion App Settings & Live Telemetry Dashboard.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CompanionSettingsScreen(
     preferenceManager: MetroPreferenceManager,
     repository: MidgleyRepository = remember { MidgleyRepository(preferenceManager = preferenceManager) },
+    obd2BleManager: Obd2BleManager? = null,
+    currentThemeMode: ThemeMode = preferenceManager.getThemeMode(),
+    onThemeModeChanged: ((ThemeMode) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val bleManager = remember(context) { obd2BleManager ?: Obd2BleManager(context) }
+    val connectionState by bleManager.connectionState.collectAsState()
+    val liveTelemetry by bleManager.latestTelemetry.collectAsState()
+
     var selectedLocale by remember { mutableStateOf(preferenceManager.getSelectedLocale()) }
     var isAutoDetect by remember { mutableStateOf(preferenceManager.isAutoDetect()) }
     var tankCapacity by remember { mutableDoubleStateOf(preferenceManager.getTankCapacityGallons()) }
@@ -69,8 +97,19 @@ fun CompanionSettingsScreen(
     var simulatedObd2 by remember { mutableStateOf(preferenceManager.isSimulatedObd2()) }
     var fuelLevelPct by remember { mutableDoubleStateOf(preferenceManager.getLastKnownFuelLevelPct()) }
 
+    var activeThemeMode by remember { mutableStateOf(currentThemeMode) }
+    var pairedDevices by remember { mutableStateOf(bleManager.getPairedDevices()) }
+
     var advisorState by remember { mutableStateOf<Resource<SavingsAdvisorResponse>>(Resource.Loading()) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
+
+    // Sync live OBD2 fuel telemetry when received from hardware or simulation
+    LaunchedEffect(liveTelemetry) {
+        liveTelemetry?.fuelLevelPercent?.let { pct ->
+            fuelLevelPct = pct
+            preferenceManager.setLastKnownFuelLevelPct(pct)
+        }
+    }
 
     val remainingGallons = (fuelLevelPct / 100.0) * tankCapacity
     val gallonsNeeded = (tankCapacity - remainingGallons).coerceAtLeast(0.0)
@@ -90,9 +129,12 @@ fun CompanionSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Midgley Gas Advisor") },
+                title = { Text("Midgley Gas Advisor", fontWeight = FontWeight.Bold) },
                 actions = {
-                    IconButton(onClick = { refreshTrigger++ }) {
+                    IconButton(onClick = {
+                        refreshTrigger++
+                        pairedDevices = bleManager.getPairedDevices()
+                    }) {
                         Text("🔄", style = MaterialTheme.typography.titleMedium)
                     }
                 },
@@ -192,7 +234,65 @@ fun CompanionSettingsScreen(
                 }
             }
 
-            // 2. OBD2 Live Fuel Telemetry Card
+            // 2. Theme / Appearance Card (Issue #9)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "🎨 Appearance & Theme",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Choose light, dark, or automatic system dark mode sync:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            FilterChip(
+                                selected = activeThemeMode == ThemeMode.SYSTEM,
+                                onClick = {
+                                    activeThemeMode = ThemeMode.SYSTEM
+                                    preferenceManager.setThemeMode(ThemeMode.SYSTEM)
+                                    onThemeModeChanged?.invoke(ThemeMode.SYSTEM)
+                                },
+                                label = { Text("🖥️ System") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = activeThemeMode == ThemeMode.LIGHT,
+                                onClick = {
+                                    activeThemeMode = ThemeMode.LIGHT
+                                    preferenceManager.setThemeMode(ThemeMode.LIGHT)
+                                    onThemeModeChanged?.invoke(ThemeMode.LIGHT)
+                                },
+                                label = { Text("☀️ Light") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = activeThemeMode == ThemeMode.DARK,
+                                onClick = {
+                                    activeThemeMode = ThemeMode.DARK
+                                    preferenceManager.setThemeMode(ThemeMode.DARK)
+                                    onThemeModeChanged?.invoke(ThemeMode.DARK)
+                                },
+                                label = { Text("🌙 Dark") },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. OBD2 Live Fuel Telemetry & Bluetooth Connection Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -206,12 +306,12 @@ fun CompanionSettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "🚗 Passive OBD2 Telemetry",
+                                    text = "🚗 Passive OBD-II Telemetry",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Reads PID 012F (Fuel Level %) via Bluetooth dongle",
+                                    text = "Dual Bluetooth (Classic SPP + BLE) Mode 01 PID 2F",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -221,28 +321,69 @@ fun CompanionSettingsScreen(
                                 onCheckedChange = {
                                     obd2Enabled = it
                                     preferenceManager.setObd2Enabled(it)
+                                    if (!it) {
+                                        bleManager.disconnect()
+                                    }
                                 }
                             )
                         }
 
                         if (obd2Enabled) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
+
+                            // Live Connection Status Banner
+                            Surface(
+                                color = when (connectionState) {
+                                    is Obd2ConnectionState.Connected -> MaterialTheme.colorScheme.primaryContainer
+                                    is Obd2ConnectionState.Connecting, is Obd2ConnectionState.Scanning -> MaterialTheme.colorScheme.secondaryContainer
+                                    is Obd2ConnectionState.Error -> MaterialTheme.colorScheme.errorContainer
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Simulate OBD2 (Demo / Testing)")
-                                Switch(
-                                    checked = simulatedObd2,
-                                    onCheckedChange = {
-                                        simulatedObd2 = it
-                                        preferenceManager.setSimulatedObd2(it)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.padding(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val statusText = when (val state = connectionState) {
+                                            is Obd2ConnectionState.Connected -> "🟢 Connected: ${state.deviceName} (${state.protocol})"
+                                            is Obd2ConnectionState.Connecting -> "🟡 Connecting to ${state.deviceName}..."
+                                            is Obd2ConnectionState.Scanning -> "🟡 Scanning for nearby BLE dongles..."
+                                            is Obd2ConnectionState.Error -> "🔴 Error: ${state.message}"
+                                            Obd2ConnectionState.Disconnected -> "⚪ Disconnected"
+                                        }
+                                        Text(
+                                            text = statusText,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (connectionState is Obd2ConnectionState.Connected) {
+                                            val conn = connectionState as Obd2ConnectionState.Connected
+                                            Text(
+                                                text = "MAC: ${conn.address}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
-                                )
+
+                                    if (connectionState is Obd2ConnectionState.Connected ||
+                                        connectionState is Obd2ConnectionState.Connecting ||
+                                        connectionState is Obd2ConnectionState.Scanning) {
+                                        OutlinedButton(
+                                            onClick = { bleManager.disconnect() },
+                                            modifier = Modifier.padding(start = 8.dp)
+                                        ) {
+                                            Text("Disconnect", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "Current Fuel Level: %.0f%% (%.1f / %.1f gal)".format(
                                     fuelLevelPct,
@@ -267,6 +408,118 @@ fun CompanionSettingsScreen(
                                 )
                             }
 
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Paired Bluetooth Devices Section
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Paired Bluetooth Adapters",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                OutlinedButton(
+                                    onClick = { pairedDevices = bleManager.getPairedDevices() }
+                                ) {
+                                    Text("Refresh", fontSize = 12.sp)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            if (pairedDevices.isEmpty()) {
+                                Text(
+                                    text = "No paired Bluetooth devices detected. Pair your OBD-II adapter in Android Settings first, then tap Refresh.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    for (device in pairedDevices) {
+                                        val isConnected = (connectionState as? Obd2ConnectionState.Connected)?.address == device.address
+                                        Surface(
+                                            color = if (isConnected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(device.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                                    Text("${device.address} • ${device.type}", style = MaterialTheme.typography.bodySmall)
+                                                }
+                                                if (isConnected) {
+                                                    FilledTonalButton(
+                                                        onClick = { bleManager.disconnect() }
+                                                    ) {
+                                                        Text("Active", fontSize = 12.sp)
+                                                    }
+                                                } else {
+                                                    Button(
+                                                        onClick = {
+                                                            preferenceManager.setLastObd2Address(device.address)
+                                                            bleManager.connectToPairedDevice(device.address, tankCapacity)
+                                                        }
+                                                    ) {
+                                                        Text("Connect", fontSize = 12.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // BLE Scanning Section
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("BLE Scanning", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("Scan for unbonded BLE 4.0/5.0 adapters", style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (connectionState is Obd2ConnectionState.Scanning) {
+                                    OutlinedButton(onClick = { bleManager.stopScan() }) {
+                                        Text("Stop Scan", fontSize = 12.sp)
+                                    }
+                                } else {
+                                    OutlinedButton(onClick = { bleManager.startScan(tankCapacity) }) {
+                                        Text("Scan BLE", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Simulation Toggle
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Simulate OBD2 (Demo / Testing)")
+                                Switch(
+                                    checked = simulatedObd2,
+                                    onCheckedChange = {
+                                        simulatedObd2 = it
+                                        preferenceManager.setSimulatedObd2(it)
+                                        if (it) {
+                                            bleManager.injectSimulatedTelemetry(fuelLevelPct, tankCapacity)
+                                        }
+                                    }
+                                )
+                            }
+
                             if (simulatedObd2) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
@@ -279,6 +532,7 @@ fun CompanionSettingsScreen(
                                     onValueChange = {
                                         fuelLevelPct = it.toDouble()
                                         preferenceManager.setLastKnownFuelLevelPct(it.toDouble())
+                                        bleManager.injectSimulatedTelemetry(it.toDouble(), tankCapacity)
                                     },
                                     valueRange = 0f..100f
                                 )
@@ -288,7 +542,7 @@ fun CompanionSettingsScreen(
                 }
             }
 
-            // 3. Vehicle Fuel Tank Capacity Card
+            // 4. Vehicle Fuel Tank Capacity Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -301,50 +555,55 @@ fun CompanionSettingsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Current capacity: %.1f Gallons".format(tankCapacity),
+                            text = "Select your vehicle's fuel tank size for net savings calculations:",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                        // Presets
-                        Row(
+                        // Preset Chips
+                        FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             for (preset in MetroPreferenceManager.TANK_PRESETS) {
                                 FilterChip(
-                                    selected = tankCapacity == preset.gallons,
+                                    selected = (tankCapacity == preset.gallons),
                                     onClick = {
                                         tankCapacity = preset.gallons
-                                        customTankText = ""
                                         preferenceManager.setTankCapacityGallons(preset.gallons)
+                                        customTankText = ""
                                     },
-                                    label = { Text("${preset.gallons.toInt()}g") }
+                                    label = { Text("${preset.label} (${preset.gallons}g)") }
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Custom Capacity Field
                         OutlinedTextField(
                             value = customTankText,
-                            onValueChange = {
-                                customTankText = it
-                                val parsed = it.toDoubleOrNull()
-                                if (parsed != null && parsed in 5.0..100.0) {
-                                    tankCapacity = parsed
-                                    preferenceManager.setTankCapacityGallons(parsed)
+                            onValueChange = { input ->
+                                customTankText = input
+                                input.toDoubleOrNull()?.let { validGallons ->
+                                    if (validGallons in 5.0..60.0) {
+                                        tankCapacity = validGallons
+                                        preferenceManager.setTankCapacityGallons(validGallons)
+                                    }
                                 }
                             },
-                            label = { Text("Custom Tank Gallons") },
+                            label = { Text("Custom Tank (Gallons)") },
+                            placeholder = { Text("%.1f".format(tankCapacity)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
                         )
                     }
                 }
             }
 
-            // 4. Active Refining Hub & Location Mode Card
+            // 5. Regional Refining Hub Selector Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -407,7 +666,7 @@ fun CompanionSettingsScreen(
                 }
             }
 
-            // 5. Alert Threshold Sensitivity Card
+            // 6. Alert Threshold Sensitivity Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -458,7 +717,7 @@ fun CompanionSettingsScreen(
                 }
             }
 
-            // 6. Backend Gateway Endpoint Card
+            // 7. Backend Gateway Endpoint Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),

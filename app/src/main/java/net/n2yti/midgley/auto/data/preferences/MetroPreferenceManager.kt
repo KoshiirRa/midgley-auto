@@ -2,11 +2,14 @@ package net.n2yti.midgley.auto.data.preferences
 
 import android.content.Context
 import android.content.SharedPreferences
-import net.n2yti.midgley.auto.BuildConfig
+
+enum class ThemeMode {
+    SYSTEM, LIGHT, DARK
+}
 
 /**
  * Manages sticky user preference for active metro refining hub, vehicle tank capacity,
- * alert sensitivity thresholds, backend API endpoints, and OBD2 telemetry configuration.
+ * alert sensitivity thresholds, backend API endpoints, theme mode, and OBD2 telemetry configuration.
  */
 class MetroPreferenceManager(context: Context) {
 
@@ -23,6 +26,7 @@ class MetroPreferenceManager(context: Context) {
         private const val KEY_SIMULATED_OBD2 = "simulated_obd2_enabled"
         private const val KEY_LAST_FUEL_LEVEL = "last_known_fuel_level_pct"
         private const val KEY_LAST_OBD2_MAC = "last_obd2_mac_address"
+        private const val KEY_THEME_MODE = "app_theme_mode"
 
         const val DEFAULT_LOCALE = "tulsa"
         const val DEFAULT_TANK_CAPACITY = 15.0
@@ -143,6 +147,15 @@ class MetroPreferenceManager(context: Context) {
 
     fun setLastObd2Address(address: String?) {
         prefs.edit().putString(KEY_LAST_OBD2_MAC, address).apply()
+    }
+
+    fun getThemeMode(): ThemeMode {
+        val raw = prefs.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name
+        return try { ThemeMode.valueOf(raw) } catch (_: Exception) { ThemeMode.SYSTEM }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
     }
 
     fun getDisplayName(localeId: String): String {
