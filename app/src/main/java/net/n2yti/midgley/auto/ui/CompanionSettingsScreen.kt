@@ -1,7 +1,6 @@
 package net.n2yti.midgley.auto.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,7 +24,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -77,7 +75,7 @@ fun CompanionSettingsScreen(
     val remainingGallons = (fuelLevelPct / 100.0) * tankCapacity
     val gallonsNeeded = (tankCapacity - remainingGallons).coerceAtLeast(0.0)
 
-    // Dynamic Live Price & Advisor Fetch on region / tank / fuel change
+    // Dynamic Live Price & Advisor Fetch on region / tank / fuel / endpoint change
     LaunchedEffect(selectedLocale, tankCapacity, fuelLevelPct, obd2Enabled, apiBaseUrl, refreshTrigger) {
         val effectiveFuelPct = if (obd2Enabled) fuelLevelPct else null
         repository.getUnifiedAdvisor(
@@ -476,13 +474,24 @@ fun CompanionSettingsScreen(
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
+                                selected = apiBaseUrl.contains("koshiirra.github.io"),
+                                onClick = {
+                                    apiBaseUrl = "https://koshiirra.github.io/midgley/"
+                                    preferenceManager.setApiBaseUrl(apiBaseUrl)
+                                }
+                            )
+                            Text("Production (GitHub Pages)")
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
                                 selected = apiBaseUrl.contains("local-dev.dwarvenbard.com"),
                                 onClick = {
                                     apiBaseUrl = "https://local-dev.dwarvenbard.com/api/v1/"
                                     preferenceManager.setApiBaseUrl(apiBaseUrl)
                                 }
                             )
-                            Text("Production (local-dev.dwarvenbard.com)")
+                            Text("Dwarvenbard Cloud Gateway")
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {

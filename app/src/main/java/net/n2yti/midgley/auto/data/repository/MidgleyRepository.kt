@@ -14,8 +14,8 @@ import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Resilient Repository coordinating unified API requests, 6-hour offline caching,
- * real-time OBD2 fuel telemetry shortfall fusion, and graceful fallback synthesis for vehicle head unit displays.
+ * Resilient Repository coordinating unified API requests across GitHub Pages static feeds
+ * and dynamic API gateways, with 6-hour offline caching and low-fuel overrides.
  */
 class MidgleyRepository(
     private val customApiService: MidgleyApiService? = null,
@@ -25,6 +25,10 @@ class MidgleyRepository(
     companion object {
         const val STALE_CACHE_THRESHOLD_HOURS = 6.0
         private const val MILLIS_PER_HOUR = 3600000.0
+
+        fun isStaticHost(url: String): Boolean {
+            return url.contains("github.io") || url.contains("github.com") || url.contains("raw.githubusercontent.com")
+        }
     }
 
     private data class CachedEntry<T>(
@@ -45,9 +49,12 @@ class MidgleyRepository(
         return ApiClientFactory.createApiService(baseUrl = baseUrl)
     }
 
+    private fun getActiveBaseUrl(): String? {
+        return preferenceManager?.getApiBaseUrl()
+    }
+
     /**
-     * Fetches unified price & forecast context with offline 6-hour caching,
-     * dynamic OBD2 fuel level shortfall calculations, and low-fuel safety reserve overrides.
+     * Fetches unified price & forecast context from GitHub Pages static feeds or dynamic API gateways.
      */
     fun getUnifiedAdvisor(
         locale: String = "tulsa",
@@ -67,7 +74,22 @@ class MidgleyRepository(
 
         try {
             val service = getService()
-            val combined = service.getCombined(locale = locale, zipCode = zipCode)
+            val baseUrl = getActiveBaseUrl()
+
+            val combined = if (customApiService != null && baseUrl == null) {
+                // Direct mock / unit-test mode without preference manager override
+                service.getCombined(locale = locale, zipCode = zipCode)
+            } else {
+                val effectiveUrl = baseUrl ?: MetroPreferenceManager.DEFAULT_PROD_URL
+                if (isStaticHost(effectiveUrl)) {
+                    val cleanBase = if (effectiveUrl.endsWith("/")) effectiveUrl else "$effectiveUrl/"
+                    val staticUrl = "${cleanBase}api/v1/combined_${locale}.json"
+                    service.getCombinedByUrl(staticUrl)
+                } else {
+                    service.getCombined(locale = locale, zipCode = zipCode)
+                }
+            }
+
             val advisor = transformCombinedToAdvisor(combined, locale, tankCapacity, fuelLevelPct)
             advisorCache[cacheKey] = CachedEntry(advisor)
             emit(Resource.Success(advisor, isCached = false, cacheAgeHours = 0.0))
@@ -163,8 +185,20 @@ class MidgleyRepository(
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
         val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 3.89
-        val targetPrice = combined.forecast?.day3Price ?: combined.forecast?.predictedPricePerGal ?: currentPrice
-        val delta = targetPrice - currentPrice
+        val targetPrice = combined.forecast?.predictedPricePerGal ?: combined.forecast?.day3Price ?: currentPrice
+
+        val delta = if (combined.forecast?.expectedChangeDollars != null) {
+            if (combined.forecast.projectedDirection?.equals("DOWN", ignoreCase = true) == true) {
+                -Math.abs(combined.forecast.expectedChangeDollars)
+            } else if (combined.forecast.projectedDirection?.equals("UP", ignoreCase = true) == true) {
+                Math.abs(combined.forecast.expectedChangeDollars)
+            } else {
+                combined.forecast.expectedChangeDollars
+            }
+        } else {
+            targetPrice - currentPrice
+        }
+
         val savingsPerGal = if (delta < 0) -delta else 0.0
 
         // Calculate dynamic shortfall gallons needed to fill up

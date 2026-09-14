@@ -28,7 +28,7 @@ class MetroPreferenceManager(context: Context) {
         const val DEFAULT_TANK_CAPACITY = 15.0
         const val DEFAULT_ALERT_THRESHOLD = 4
         const val DEFAULT_FUEL_LEVEL_PCT = 45.0
-        const val DEFAULT_PROD_URL = "https://local-dev.dwarvenbard.com/api/v1/"
+        const val DEFAULT_PROD_URL = "https://koshiirra.github.io/midgley/"
 
         val TANK_PRESETS = listOf(
             TankPreset("Compact / Hatchback", 12.0),

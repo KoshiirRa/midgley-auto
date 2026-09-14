@@ -8,6 +8,7 @@ import net.n2yti.midgley.auto.data.models.SavingsAdvisorResponse
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Url
 
 interface MidgleyApiService {
 
@@ -18,6 +19,14 @@ interface MidgleyApiService {
     suspend fun getCombined(
         @Query("locale") locale: String = "national",
         @Query("zip_code") zipCode: String? = null
+    ): CombinedApiResponse
+
+    /**
+     * Direct URL fetch for static JSON files on GitHub Pages (e.g. https://koshiirra.github.io/midgley/api/v1/combined_tulsa.json).
+     */
+    @GET
+    suspend fun getCombinedByUrl(
+        @Url url: String
     ): CombinedApiResponse
 
     /**
