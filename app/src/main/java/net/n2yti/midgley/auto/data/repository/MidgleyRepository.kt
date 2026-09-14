@@ -5,16 +5,16 @@ import kotlinx.coroutines.flow.flow
 import net.n2yti.midgley.auto.data.api.ApiClientFactory
 import net.n2yti.midgley.auto.data.api.MidgleyApiService
 import net.n2yti.midgley.auto.data.models.CombinedApiResponse
-import net.n2yti.midgley.auto.data.models.ForecastDayPoint
 import net.n2yti.midgley.auto.data.models.ForecastResponse
 import net.n2yti.midgley.auto.data.models.LocationResolveResponse
 import net.n2yti.midgley.auto.data.models.RecommendationCode
 import net.n2yti.midgley.auto.data.models.SavingsAdvisorResponse
+import net.n2yti.midgley.auto.data.obd.Obd2PidDecoder
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Resilient Repository coordinating unified API requests, 6-hour offline caching,
- * and graceful fallback synthesis for vehicle head unit displays.
+ * real-time OBD2 fuel telemetry shortfall fusion, and graceful fallback synthesis for vehicle head unit displays.
  */
 class MidgleyRepository(
     private val apiService: MidgleyApiService = ApiClientFactory.createApiService()
@@ -38,14 +38,17 @@ class MidgleyRepository(
     private val locationCache = ConcurrentHashMap<String, CachedEntry<LocationResolveResponse>>()
 
     /**
-     * Fetches unified price & forecast context with offline 6-hour caching and fallback generation.
+     * Fetches unified price & forecast context with offline 6-hour caching,
+     * dynamic OBD2 fuel level shortfall calculations, and low-fuel safety reserve overrides.
      */
     fun getUnifiedAdvisor(
         locale: String = "tulsa",
         zipCode: String? = null,
-        tankCapacity: Double = 15.0
+        tankCapacity: Double = 15.0,
+        fuelLevelPct: Double? = null
     ): Flow<Resource<SavingsAdvisorResponse>> = flow {
-        val cacheKey = "${locale}_${zipCode ?: "default"}"
+        val fuelKey = fuelLevelPct?.toInt() ?: -1
+        val cacheKey = "${locale}_${zipCode ?: "default"}_$fuelKey"
         val cached = advisorCache[cacheKey]
 
         if (cached != null) {
@@ -56,7 +59,7 @@ class MidgleyRepository(
 
         try {
             val combined = apiService.getCombined(locale = locale, zipCode = zipCode)
-            val advisor = transformCombinedToAdvisor(combined, locale, tankCapacity)
+            val advisor = transformCombinedToAdvisor(combined, locale, tankCapacity, fuelLevelPct)
             advisorCache[cacheKey] = CachedEntry(advisor)
             emit(Resource.Success(advisor, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
@@ -74,7 +77,7 @@ class MidgleyRepository(
                 )
             } else {
                 // Synthesize graceful offline fallback recommendation so in-dash head unit never crashes
-                val fallback = generateOfflineFallbackAdvisor(locale, tankCapacity)
+                val fallback = generateOfflineFallbackAdvisor(locale, tankCapacity, fuelLevelPct)
                 emit(
                     Resource.Error(
                         message = e.localizedMessage ?: "Network connection unavailable",
@@ -142,29 +145,60 @@ class MidgleyRepository(
         }
     }
 
-    private fun transformCombinedToAdvisor(
+    fun transformCombinedToAdvisor(
         combined: CombinedApiResponse,
         locale: String,
-        tankCapacity: Double
+        tankCapacity: Double,
+        fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
         val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 3.89
         val targetPrice = combined.forecast?.day3Price ?: combined.forecast?.predictedPricePerGal ?: currentPrice
         val delta = targetPrice - currentPrice
         val savingsPerGal = if (delta < 0) -delta else 0.0
-        val netSavings = savingsPerGal * tankCapacity
 
-        val (code, signal) = when {
-            delta <= -0.04 -> Pair(RecommendationCode.WAIT_TO_FILL, "🟢 WAIT TO FILL UP")
-            delta >= 0.04 -> Pair(RecommendationCode.FILL_NOW, "🔴 FILL UP NOW")
-            else -> Pair(RecommendationCode.STABLE, "🟡 PRICES STABLE")
+        // Calculate dynamic shortfall gallons needed to fill up
+        val effectiveShortfallGallons = if (fuelLevelPct != null) {
+            val clampedPct = fuelLevelPct.coerceIn(0.0, 100.0)
+            val fuelGallons = (clampedPct / 100.0) * tankCapacity
+            (tankCapacity - fuelGallons).coerceAtLeast(0.0)
+        } else {
+            tankCapacity
+        }
+
+        val netSavings = savingsPerGal * effectiveShortfallGallons
+
+        // Safety override if tank is in low-fuel reserve (< 15%)
+        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
+
+        val (code, signal, timingText) = when {
+            isLowFuel -> Triple(
+                RecommendationCode.FILL_NOW,
+                "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP NOW",
+                "Reserve Alert: Fill Up Immediately (< 15%)"
+            )
+            delta <= -0.04 -> Triple(
+                RecommendationCode.WAIT_TO_FILL,
+                "🟢 WAIT TO FILL UP",
+                "Projected Trough (Day 3)"
+            )
+            delta >= 0.04 -> Triple(
+                RecommendationCode.FILL_NOW,
+                "🔴 FILL UP TODAY",
+                "Spike Imminent: Fill Up Now"
+            )
+            else -> Triple(
+                RecommendationCode.STABLE,
+                "🟡 PRICES STABLE",
+                "Stable Window: Refuel as needed"
+            )
         }
 
         return SavingsAdvisorResponse(
             locationId = locale,
             recommendationCode = code,
             displaySignal = signal,
-            optimalDay = 3,
-            optimalDate = "Projected Trough (Day 3)",
+            optimalDay = if (isLowFuel) 0 else 3,
+            optimalDate = timingText,
             currentPriceGal = currentPrice,
             targetPriceGal = targetPrice,
             savingsPerGal = savingsPerGal,
@@ -177,14 +211,22 @@ class MidgleyRepository(
 
     private fun generateOfflineFallbackAdvisor(
         locale: String,
-        tankCapacity: Double
+        tankCapacity: Double,
+        fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
+        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
+        val signal = if (isLowFuel) {
+            "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP (Offline)"
+        } else {
+            "🟡 PRICES STABLE (Offline)"
+        }
+
         return SavingsAdvisorResponse(
             locationId = locale,
-            recommendationCode = RecommendationCode.STABLE,
-            displaySignal = "🟡 PRICES STABLE (Offline)",
+            recommendationCode = if (isLowFuel) RecommendationCode.FILL_NOW else RecommendationCode.STABLE,
+            displaySignal = signal,
             optimalDay = 0,
-            optimalDate = "Current Baseline",
+            optimalDate = if (isLowFuel) "Reserve Alert: Fill Up Now" else "Current Baseline",
             currentPriceGal = 3.89,
             targetPriceGal = 3.89,
             savingsPerGal = 0.0,

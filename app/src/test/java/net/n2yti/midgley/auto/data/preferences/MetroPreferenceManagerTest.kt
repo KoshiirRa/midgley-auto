@@ -23,6 +23,9 @@ class MetroPreferenceManagerTest {
         preferenceManager.setTankCapacityGallons(15.0)
         preferenceManager.setAlertThresholdCents(4)
         preferenceManager.setSevereWeatherAlertsEnabled(true)
+        preferenceManager.setObd2Enabled(true)
+        preferenceManager.setSimulatedObd2(false)
+        preferenceManager.setLastKnownFuelLevelPct(45.0)
     }
 
     @Test
@@ -70,5 +73,20 @@ class MetroPreferenceManagerTest {
     fun testApiBaseUrl_customEndpoint() {
         preferenceManager.setApiBaseUrl("http://10.42.42.54:8000/api/v1/")
         assertThat(preferenceManager.getApiBaseUrl()).contains("10.42.42.54")
+    }
+
+    @Test
+    fun testObd2Preferences_getAndSet() {
+        preferenceManager.setObd2Enabled(false)
+        assertThat(preferenceManager.isObd2Enabled()).isFalse()
+
+        preferenceManager.setSimulatedObd2(true)
+        assertThat(preferenceManager.isSimulatedObd2()).isTrue()
+
+        preferenceManager.setLastKnownFuelLevelPct(62.5)
+        assertThat(preferenceManager.getLastKnownFuelLevelPct()).isEqualTo(62.5)
+
+        preferenceManager.setLastObd2Address("00:11:22:33:44:55")
+        assertThat(preferenceManager.getLastObd2Address()).isEqualTo("00:11:22:33:44:55")
     }
 }

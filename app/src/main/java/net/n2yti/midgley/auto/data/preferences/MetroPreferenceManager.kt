@@ -6,7 +6,7 @@ import net.n2yti.midgley.auto.BuildConfig
 
 /**
  * Manages sticky user preference for active metro refining hub, vehicle tank capacity,
- * alert sensitivity thresholds, and backend API endpoints.
+ * alert sensitivity thresholds, backend API endpoints, and OBD2 telemetry configuration.
  */
 class MetroPreferenceManager(context: Context) {
 
@@ -19,9 +19,15 @@ class MetroPreferenceManager(context: Context) {
         private const val KEY_WEATHER_ALERTS = "weather_alerts_enabled"
         private const val KEY_API_BASE_URL = "api_base_url"
 
+        private const val KEY_OBD2_ENABLED = "obd2_enabled"
+        private const val KEY_SIMULATED_OBD2 = "simulated_obd2_enabled"
+        private const val KEY_LAST_FUEL_LEVEL = "last_known_fuel_level_pct"
+        private const val KEY_LAST_OBD2_MAC = "last_obd2_mac_address"
+
         const val DEFAULT_LOCALE = "tulsa"
         const val DEFAULT_TANK_CAPACITY = 15.0
         const val DEFAULT_ALERT_THRESHOLD = 4
+        const val DEFAULT_FUEL_LEVEL_PCT = 45.0
 
         val TANK_PRESETS = listOf(
             TankPreset("Compact / Hatchback", 12.0),
@@ -104,6 +110,38 @@ class MetroPreferenceManager(context: Context) {
 
     fun setApiBaseUrl(url: String) {
         prefs.edit().putString(KEY_API_BASE_URL, url).apply()
+    }
+
+    fun isObd2Enabled(): Boolean {
+        return prefs.getBoolean(KEY_OBD2_ENABLED, true)
+    }
+
+    fun setObd2Enabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_OBD2_ENABLED, enabled).apply()
+    }
+
+    fun isSimulatedObd2(): Boolean {
+        return prefs.getBoolean(KEY_SIMULATED_OBD2, false)
+    }
+
+    fun setSimulatedObd2(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SIMULATED_OBD2, enabled).apply()
+    }
+
+    fun getLastKnownFuelLevelPct(): Double {
+        return prefs.getFloat(KEY_LAST_FUEL_LEVEL, DEFAULT_FUEL_LEVEL_PCT.toFloat()).toDouble()
+    }
+
+    fun setLastKnownFuelLevelPct(pct: Double) {
+        prefs.edit().putFloat(KEY_LAST_FUEL_LEVEL, pct.toFloat()).apply()
+    }
+
+    fun getLastObd2Address(): String? {
+        return prefs.getString(KEY_LAST_OBD2_MAC, null)
+    }
+
+    fun setLastObd2Address(address: String?) {
+        prefs.edit().putString(KEY_LAST_OBD2_MAC, address).apply()
     }
 
     fun getDisplayName(localeId: String): String {
