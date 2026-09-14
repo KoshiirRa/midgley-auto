@@ -20,6 +20,9 @@ class MetroPreferenceManagerTest {
         preferenceManager = MetroPreferenceManager(context)
         // Reset to default
         preferenceManager.setAutoDetect(true)
+        preferenceManager.setTankCapacityGallons(15.0)
+        preferenceManager.setAlertThresholdCents(4)
+        preferenceManager.setSevereWeatherAlertsEnabled(true)
     }
 
     @Test
@@ -43,5 +46,29 @@ class MetroPreferenceManagerTest {
 
         preferenceManager.setAutoDetect(true)
         assertThat(preferenceManager.isAutoDetect()).isTrue()
+    }
+
+    @Test
+    fun testTankCapacity_getAndSet() {
+        preferenceManager.setTankCapacityGallons(24.0)
+        assertThat(preferenceManager.getTankCapacityGallons()).isEqualTo(24.0)
+    }
+
+    @Test
+    fun testAlertThreshold_getAndSet() {
+        preferenceManager.setAlertThresholdCents(8)
+        assertThat(preferenceManager.getAlertThresholdCents()).isEqualTo(8)
+    }
+
+    @Test
+    fun testSevereWeatherAlerts_toggle() {
+        preferenceManager.setSevereWeatherAlertsEnabled(false)
+        assertThat(preferenceManager.isSevereWeatherAlertsEnabled()).isFalse()
+    }
+
+    @Test
+    fun testApiBaseUrl_customEndpoint() {
+        preferenceManager.setApiBaseUrl("http://10.42.42.54:8000/api/v1/")
+        assertThat(preferenceManager.getApiBaseUrl()).contains("10.42.42.54")
     }
 }
