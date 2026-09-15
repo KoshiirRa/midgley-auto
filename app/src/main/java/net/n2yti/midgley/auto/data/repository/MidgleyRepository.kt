@@ -1,5 +1,6 @@
 package net.n2yti.midgley.auto.data.repository
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import net.n2yti.midgley.auto.data.api.ApiClientFactory
@@ -94,6 +95,7 @@ class MidgleyRepository(
             advisorCache[cacheKey] = CachedEntry(advisor)
             emit(Resource.Success(advisor, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
+            Log.e("MidgleyRepo", "Failed to fetch unified advisor for $locale: ${e.message}", e)
             if (cached != null) {
                 val advisorWithFlag = cached.data.copy(
                     isCached = true,
@@ -138,10 +140,11 @@ class MidgleyRepository(
             forecastCache[locationId] = CachedEntry(forecast)
             emit(Resource.Success(forecast, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
+            Log.e("MidgleyRepo", "Failed to fetch 5-day forecast for $locationId: ${e.message}", e)
             if (cached != null) {
                 emit(Resource.Success(cached.data, isCached = true, cacheAgeHours = cached.ageHours))
             } else {
-                emit(Resource.Error(e.localizedMessage ?: "Forecast lookup failed"))
+                emit(Resource.Error(e.localizedMessage ?: "Forecast service unavailable"))
             }
         }
     }
@@ -154,6 +157,8 @@ class MidgleyRepository(
         val cached = locationCache[cacheKey]
         if (cached != null) {
             emit(Resource.Loading(cached.data))
+        } else {
+            emit(Resource.Loading())
         }
 
         try {
@@ -162,6 +167,7 @@ class MidgleyRepository(
             locationCache[cacheKey] = CachedEntry(resolved)
             emit(Resource.Success(resolved))
         } catch (e: Exception) {
+            Log.e("MidgleyRepo", "Failed to resolve location ($lat, $lon): ${e.message}", e)
             if (cached != null) {
                 emit(Resource.Success(cached.data, isCached = true, cacheAgeHours = cached.ageHours))
             } else {
@@ -260,13 +266,13 @@ class MidgleyRepository(
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
         val basePrice = when (locale.lowercase()) {
-            "oakland" -> 4.65
-            "port_st_lucie" -> 3.39
-            "newark" -> 3.25
-            "cincinnati" -> 3.19
-            "greenville", "charlotte" -> 3.15
-            "tulsa" -> 2.99
-            else -> 3.45
+            "oakland" -> 4.89
+            "port_st_lucie" -> 3.49
+            "newark" -> 3.39
+            "cincinnati" -> 3.45
+            "greenville", "charlotte" -> 3.35
+            "tulsa" -> 3.89
+            else -> 3.65
         }
 
         val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT

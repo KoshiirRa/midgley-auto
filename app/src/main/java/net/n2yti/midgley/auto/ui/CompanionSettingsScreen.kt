@@ -242,6 +242,15 @@ fun CompanionSettingsScreen(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
+
+                            if (advisorState is Resource.Error && advisorState.message != null) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "⚠️ Offline: ${advisorState.message}",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         } else {
                             Text("Fetching live regional prices from Midgley Gateway...")
                         }

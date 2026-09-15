@@ -2,6 +2,7 @@ package net.n2yti.midgley.auto.data.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class LocaleInfo(
@@ -15,14 +16,18 @@ data class LocaleInfo(
 data class KeyDriver(
     @SerialName("category") val category: String = "",
     @SerialName("description") val description: String = "",
-    @SerialName("impact_score") val impactScore: Double = 0.0
+    @SerialName("impact_score") val impactScore: Double = 0.0,
+    @SerialName("impact_dollars") val impactDollars: Double? = null,
+    @SerialName("impact_pct") val impactPct: Double? = null,
+    @SerialName("share_pct") val sharePct: Double? = null,
+    @SerialName("direction") val direction: String? = null
 )
 
 @Serializable
 data class LiveLookup(
     @SerialName("current_price_per_gal") val currentPricePerGal: Double = 0.0,
     @SerialName("source") val source: String? = null,
-    @SerialName("provenance") val provenance: String? = null,
+    @SerialName("provenance") val provenance: JsonElement? = null,
     @SerialName("cache_hit") val cacheHit: Boolean = false,
     @SerialName("cache_age_seconds") val cacheAgeSeconds: Double = 0.0,
     @SerialName("carb_tax_regulatory_burden_per_gal") val carbTaxRegulatoryBurdenPerGal: Double = 0.0

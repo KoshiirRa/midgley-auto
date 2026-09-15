@@ -91,4 +91,76 @@ class MidgleyRepositoryTest {
         assertThat(lastEmission.data?.isCached).isTrue()
         assertThat(lastEmission.data?.confidenceLevel).isEqualTo("OFFLINE_ESTIMATE")
     }
+
+    @Test
+    fun testGetUnifiedAdvisor_withNestedProvenanceObject_parsesSuccessfully() = runBlocking {
+        val gitHubPagesJson = """
+            {
+              "status": "success",
+              "timestamp": "2026-09-14T15:30:59.844548",
+              "locale": {
+                "code": "tulsa",
+                "region_id": "Tulsa_OK",
+                "name": "Tulsa Metro Area, OK",
+                "padd_region": "PADD 2 Midwest"
+              },
+              "live_lookup": {
+                "current_price_per_gal": 3.888,
+                "source": "AAA Web Scraper (Tulsa, OK)",
+                "provenance": {
+                  "source": "AAA Web Scraper (Tulsa, OK)",
+                  "region_id": "Tulsa_OK",
+                  "padd": "PADD 2",
+                  "requested_granularity": "METRO",
+                  "served_granularity": "METRO",
+                  "is_fallback_granularity": false,
+                  "cache_status": "HIT_STALE",
+                  "timestamp": "2026-09-14T15:30:59Z"
+                },
+                "cache_hit": false,
+                "cache_age_seconds": 0.0,
+                "carb_tax_regulatory_burden_per_gal": 0.0
+              },
+              "forecast": {
+                "model_version": "v1.6 Ipatieff",
+                "forecast_horizon_days": 5,
+                "target_date": "2026-09-19",
+                "current_base_price": 3.888,
+                "predicted_price_per_gal": 3.933,
+                "expected_change_dollars": 0.045,
+                "expected_change_percent": 1.16,
+                "projected_direction": "UP",
+                "directional_hit_rate_historical": 0.6079,
+                "historical_mae_dollars": 0.1069
+              },
+              "key_drivers": [
+                {
+                  "category": "Regional Logistics & Hub Delivery",
+                  "description": "Delivery hub rack margin expansion",
+                  "impact_dollars": 0.013,
+                  "impact_pct": 0.33,
+                  "share_pct": 30.0,
+                  "direction": "UP"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(gitHubPagesJson)
+                .addHeader("Content-Type", "application/json; charset=utf-8")
+        )
+
+        val emissions = repository.getUnifiedAdvisor(locale = "tulsa", tankCapacity = 15.0).toList()
+        assertThat(emissions).hasSize(2)
+        assertThat(emissions[1]).isInstanceOf(Resource.Success::class.java)
+
+        val success = emissions[1] as Resource.Success
+        assertThat(success.data).isNotNull()
+        assertThat(success.data?.currentPriceGal).isEqualTo(3.888)
+        assertThat(success.data?.targetPriceGal).isEqualTo(3.933)
+        assertThat(success.data?.recommendationCode).isEqualTo(RecommendationCode.FILL_NOW)
+    }
 }
