@@ -113,21 +113,30 @@ class ForecastDetailScreen(
     }
 
     private fun generateFallbackForecast(): ForecastResponse {
-        val base = 3.89
+        val base = when (localeId.lowercase()) {
+            "oakland", "bayarea", "sanfrancisco", "sanjose", "northbay" -> 6.13
+            "port_st_lucie" -> 4.31
+            "newark" -> 4.36
+            "cincinnati" -> 4.50
+            "greenville" -> 4.16
+            "charlotte" -> 4.22
+            "tulsa" -> 4.01
+            else -> 4.15
+        }
         val points = listOf(
             ForecastDayPoint(0, "Today", base, base - 0.04, base + 0.04),
-            ForecastDayPoint(1, "Tomorrow", base - 0.02, base - 0.06, base + 0.02),
-            ForecastDayPoint(2, "Day 2", base - 0.05, base - 0.09, base - 0.01),
-            ForecastDayPoint(3, "Day 3 (Trough)", base - 0.10, base - 0.14, base - 0.06),
-            ForecastDayPoint(4, "Day 4", base - 0.07, base - 0.11, base - 0.03),
-            ForecastDayPoint(5, "Day 5", base - 0.04, base - 0.08, base + 0.01)
+            ForecastDayPoint(1, "Tomorrow", base + 0.02, base - 0.02, base + 0.06),
+            ForecastDayPoint(2, "Day 2", base + 0.04, base, base + 0.08),
+            ForecastDayPoint(3, "Day 3", base + 0.06, base + 0.02, base + 0.10),
+            ForecastDayPoint(4, "Day 4", base + 0.08, base + 0.04, base + 0.12),
+            ForecastDayPoint(5, "Day 5", base + 0.10, base + 0.06, base + 0.14)
         )
         return ForecastResponse(
             locationId = localeId,
             asOfTimestamp = "Offline Mode",
             basePrice = base,
             forecast = points,
-            directionalTrend = "TROUGH_DAY_3"
+            directionalTrend = "UP"
         )
     }
 }

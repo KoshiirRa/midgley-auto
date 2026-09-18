@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.flow
 import net.n2yti.midgley.auto.data.api.ApiClientFactory
 import net.n2yti.midgley.auto.data.api.MidgleyApiService
 import net.n2yti.midgley.auto.data.models.CombinedApiResponse
+import net.n2yti.midgley.auto.data.models.ForecastDayPoint
 import net.n2yti.midgley.auto.data.models.ForecastResponse
 import net.n2yti.midgley.auto.data.models.LocationResolveResponse
 import net.n2yti.midgley.auto.data.models.RecommendationCode
@@ -136,7 +137,23 @@ class MidgleyRepository(
 
         try {
             val service = getService()
-            val forecast = service.getForecast(locationId)
+            val baseUrl = getActiveBaseUrl()
+
+            val forecast = if (customApiService != null && baseUrl == null) {
+                // Direct mock / unit-test mode without preference manager override
+                service.getForecast(locationId)
+            } else {
+                val effectiveUrl = baseUrl ?: MetroPreferenceManager.DEFAULT_PROD_URL
+                if (isStaticHost(effectiveUrl)) {
+                    val cleanBase = if (effectiveUrl.endsWith("/")) effectiveUrl else "$effectiveUrl/"
+                    val staticUrl = "${cleanBase}api/v1/combined_${locationId}.json"
+                    val combined = service.getCombinedByUrl(staticUrl)
+                    transformCombinedToForecast(combined, locationId)
+                } else {
+                    service.getForecast(locationId)
+                }
+            }
+
             forecastCache[locationId] = CachedEntry(forecast)
             emit(Resource.Success(forecast, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
@@ -190,7 +207,7 @@ class MidgleyRepository(
         tankCapacity: Double,
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
-        val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 3.89
+        val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 4.01
         val targetPrice = combined.forecast?.predictedPricePerGal ?: combined.forecast?.day3Price ?: currentPrice
 
         val delta = if (combined.forecast?.expectedChangeDollars != null) {
@@ -260,19 +277,47 @@ class MidgleyRepository(
         )
     }
 
+    fun transformCombinedToForecast(combined: CombinedApiResponse, locale: String): ForecastResponse {
+        val basePrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 4.01
+        val fc = combined.forecast
+        val delta = fc?.expectedChangeDollars ?: 0.0
+        val p1 = fc?.day1Price ?: (basePrice + delta * 0.2)
+        val p2 = fc?.day2Price ?: (basePrice + delta * 0.4)
+        val p3 = fc?.day3Price ?: (basePrice + delta * 0.6)
+        val p4 = fc?.day4Price ?: (basePrice + delta * 0.8)
+        val p5 = fc?.day5Price ?: fc?.predictedPricePerGal ?: (basePrice + delta)
+
+        val points = listOf(
+            ForecastDayPoint(0, "Today", basePrice, basePrice - 0.04, basePrice + 0.04),
+            ForecastDayPoint(1, "Tomorrow", p1, p1 - 0.04, p1 + 0.04),
+            ForecastDayPoint(2, "Day 2", p2, p2 - 0.05, p2 + 0.05),
+            ForecastDayPoint(3, "Day 3", p3, p3 - 0.06, p3 + 0.06),
+            ForecastDayPoint(4, "Day 4", p4, p4 - 0.07, p4 + 0.07),
+            ForecastDayPoint(5, "Day 5", p5, p5 - 0.08, p5 + 0.08)
+        )
+        return ForecastResponse(
+            locationId = locale,
+            asOfTimestamp = combined.timestamp.ifEmpty { "Live Model Stream" },
+            basePrice = basePrice,
+            forecast = points,
+            directionalTrend = fc?.projectedDirection ?: "UP"
+        )
+    }
+
     private fun generateOfflineFallbackAdvisor(
         locale: String,
         tankCapacity: Double,
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
         val basePrice = when (locale.lowercase()) {
-            "oakland" -> 4.89
-            "port_st_lucie" -> 3.49
-            "newark" -> 3.39
-            "cincinnati" -> 3.45
-            "greenville", "charlotte" -> 3.35
-            "tulsa" -> 3.89
-            else -> 3.65
+            "oakland", "bayarea", "sanfrancisco", "sanjose", "northbay" -> 6.13
+            "port_st_lucie" -> 4.31
+            "newark" -> 4.36
+            "cincinnati" -> 4.50
+            "greenville" -> 4.16
+            "charlotte" -> 4.22
+            "tulsa" -> 4.01
+            else -> 4.15
         }
 
         val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
