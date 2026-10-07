@@ -29,12 +29,13 @@ object MetroLocationResolver {
         val isExactMetro: Boolean
     )
 
-    private val HUBS = listOf(
+    val HUBS = listOf(
         HubCoord("tulsa", "Tulsa Metro Area", "PADD 2 (Midwest • Cushing WTI)", 36.1540, -95.9928),
         HubCoord("newark", "Newark Metro Area", "PADD 1B (Central Atlantic • Delaware City)", 40.7357, -74.1724),
         HubCoord("cincinnati", "Cincinnati Tri-State", "PADD 2 (Midwest • Ohio River)", 39.1031, -84.5120),
-        HubCoord("greenville", "Greenville & Charlotte", "PADD 1C (Lower Atlantic • Colonial Pipeline)", 35.6127, -77.3664),
-        HubCoord("oakland", "Oakland & SF Bay Area", "PADD 5 (West Coast • CARB)", 37.8044, -122.2712),
+        HubCoord("greenville", "Greenville Metro, NC", "PADD 1C (Lower Atlantic • Colonial Pipeline)", 35.6127, -77.3664),
+        HubCoord("charlotte", "Charlotte Metro, NC", "PADD 1C (Lower Atlantic • Paw Creek Junction)", 35.2271, -80.8431),
+        HubCoord("oakland", "SF Bay Area & Oakland", "PADD 5 (West Coast • CARB)", 37.8044, -122.2712),
         HubCoord("port_st_lucie", "Port St. Lucie", "PADD 1C (Lower Atlantic • Waterborne)", 27.2730, -80.3582)
     )
 
@@ -42,12 +43,12 @@ object MetroLocationResolver {
      * Resolves given GPS coordinate to the closest logical refining hub or national baseline.
      */
     fun resolve(lat: Double, lon: Double): ResolvedMetro {
-        // 1. California CARB Mandate Boundary Check (Statewide CA follows CARB-spec pricing)
+        // 1. California CARB Mandate Boundary Check (Statewide CA follows CARB-spec pricing, Issue #16)
         if (isInsideCalifornia(lat, lon)) {
             val dist = computeHaversineKm(lat, lon, 37.8044, -122.2712)
             return ResolvedMetro(
                 id = "oakland",
-                name = "Oakland & SF Bay Area (PADD 5 CARB)",
+                name = "SF Bay Area & Oakland (PADD 5 CARB)",
                 padd = "PADD 5 (West Coast)",
                 distanceKm = dist,
                 isExactMetro = dist <= 120.0
@@ -114,12 +115,38 @@ object MetroLocationResolver {
         return earthRadiusKm * c
     }
 
-    private fun isInsideCalifornia(lat: Double, lon: Double): Boolean {
-        // Approximate California state bounding polygon
-        return lat in 32.5..42.0 && lon in -124.5..-114.1
+    /**
+     * Determines whether the given coordinate is within California, respecting the true state boundaries
+     * and excluding Nevada (Reno, Carson City, Las Vegas) and Arizona (Lake Havasu City) (Issue #16).
+     */
+    fun isInsideCalifornia(lat: Double, lon: Double): Boolean {
+        // Latitude bounds for California
+        if (lat !in 32.53..42.0) return false
+
+        // Pacific coast / western boundary
+        if (lon < -124.5) return false
+
+        // 1. Northern California - Nevada Border (lat >= 39.0° N):
+        // Border is strictly longitude -120.0° W. Points east of -120.0° (Reno, Carson City) are in Nevada.
+        if (lat >= 39.0) {
+            return lon <= -120.0
+        }
+
+        // 2. Diagonal California - Nevada Border (35.0° N <= lat < 39.0° N):
+        // Diagonal line from (39.0, -120.0) south-southeast to (35.0, -114.6) on the Colorado River.
+        // Slope: borderLon = -120.0 - 1.35 * (lat - 39.0). Points where lon > borderLon are in Nevada.
+        if (lat >= 35.0) {
+            val borderLon = -120.0 - 1.35 * (lat - 39.0)
+            return lon <= borderLon
+        }
+
+        // 3. Southern California - Arizona Border (lat < 35.0° N):
+        // Colorado River border from (35.0, -114.6) to (32.7, -114.7).
+        val riverBorderLon = -114.6 - 0.043 * (lat - 35.0)
+        return lon <= riverBorderLon
     }
 
-    private fun isInsideFlorida(lat: Double, lon: Double): Boolean {
+    fun isInsideFlorida(lat: Double, lon: Double): Boolean {
         // Approximate Florida peninsula bounding polygon
         return lat in 24.5..31.0 && lon in -87.6..-80.0
     }

@@ -8,6 +8,8 @@ import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.launchIn
@@ -28,17 +30,28 @@ class MainCarScreen(
     private val repository: MidgleyRepository = MidgleyRepository(),
     private val preferenceManager: MetroPreferenceManager = MetroPreferenceManager(carContext),
     private val obd2Manager: Obd2BleManager = Obd2BleManager(carContext)
-) : Screen(carContext) {
+) : Screen(carContext), DefaultLifecycleObserver {
 
     private var advisorData: SavingsAdvisorResponse? = null
     private var telemetryData: Obd2Telemetry? = null
     private var isLoading: Boolean = true
     private var errorMessage: String? = null
     private var fetchJob: Job? = null
+    private var obd2Job: Job? = null
 
     init {
+        lifecycle.addObserver(this)
         initObd2Telemetry()
         loadAdvisor()
+    }
+
+    override fun onDestroy(owner: LifecycleOwner) {
+        fetchJob?.cancel()
+        fetchJob = null
+        obd2Job?.cancel()
+        obd2Job = null
+        obd2Manager.disconnect()
+        super.onDestroy(owner)
     }
 
     private fun initObd2Telemetry() {
@@ -52,7 +65,7 @@ class MainCarScreen(
             }
         }
 
-        obd2Manager.latestTelemetry
+        obd2Job = obd2Manager.latestTelemetry
             .onEach { telemetry ->
                 telemetryData = telemetry
                 if (telemetry != null) {
@@ -104,14 +117,31 @@ class MainCarScreen(
         val modeTag = if (isAuto) "Auto-Detect (GPS)" else "Manual Lock"
 
         val data = advisorData
-        val displaySignal = data?.displaySignal ?: "🟡 ANALYZING MARKET CONDITIONS..."
-        val currentPrice = data?.currentPriceGal?.let { "$%.2f/gal".format(it) } ?: "$3.89/gal"
+        val displaySignal = when {
+            data != null -> data.displaySignal
+            isLoading -> "🟡 ANALYZING MARKET CONDITIONS..."
+            else -> "🔴 OFFLINE • FEED UNAVAILABLE"
+        }
+
+        val currentPrice = when {
+            data != null && data.currentPriceGal > 0.0 -> "$%.2f/gal".format(data.currentPriceGal)
+            isLoading -> "Syncing..."
+            else -> "Unavailable (Offline)"
+        }
+
         val savingsText = if ((data?.savingsPerGal ?: 0.0) > 0.0) {
             " • Save $%.2f/gal (~$%.2f/fill)".format(data?.savingsPerGal, data?.netTankSavingsUsd)
         } else ""
 
-        val optimalTiming = data?.optimalDate ?: "Optimal Timing: Day 3"
-        val cacheTag = if (data?.isCached == true) " • (Cached)" else ""
+        val optimalTiming = when {
+            data != null && data.optimalDate.isNotEmpty() -> data.optimalDate
+            isLoading -> "Analyzing Timing..."
+            else -> "Offline • Awaiting Network"
+        }
+
+        val cacheTag = if (data?.isCached == true) {
+            if (data.cacheAgeHours > 0.0) " • (Cached ${"%.1f".format(data.cacheAgeHours)}h)" else " • (Cached)"
+        } else ""
 
         val rowSignal = Row.Builder()
             .setTitle(displaySignal)

@@ -13,6 +13,16 @@ updates:
       gradle-dependencies:
         patterns:
           - "*"
+    ignore:
+      # Block upgrades requiring compileSdk 37+ (Issue #13)
+      - dependency-name: "com.squareup.okhttp3:*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.squareup.retrofit2:*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.core:core*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "androidx.compose.ui:*"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   # GitHub Actions Workflow Dependencies

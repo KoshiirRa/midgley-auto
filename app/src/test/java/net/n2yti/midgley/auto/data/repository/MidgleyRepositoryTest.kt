@@ -23,6 +23,7 @@ class MidgleyRepositoryTest {
 
     @Before
     fun setUp() {
+        ApiClientFactory.clearCache()
         mockWebServer = MockWebServer()
         mockWebServer.start()
         val baseUrl = mockWebServer.url("/api/v1/").toString()
@@ -36,6 +37,7 @@ class MidgleyRepositoryTest {
     @After
     fun tearDown() {
         mockWebServer.shutdown()
+        ApiClientFactory.clearCache()
     }
 
     @Test
@@ -167,5 +169,26 @@ class MidgleyRepositoryTest {
         assertThat(success.data?.currentPriceGal).isEqualTo(3.888)
         assertThat(success.data?.targetPriceGal).isEqualTo(3.933)
         assertThat(success.data?.recommendationCode).isEqualTo(RecommendationCode.FILL_NOW)
+    }
+
+    @Test
+    fun testTransformCombinedToForecast_noSyntheticConfidenceBands() {
+        val combined = net.n2yti.midgley.auto.data.models.CombinedApiResponse(
+            status = "success",
+            timestamp = "2026-10-06T12:00:00Z",
+            liveLookup = net.n2yti.midgley.auto.data.models.LiveLookup(currentPricePerGal = 4.12),
+            forecast = net.n2yti.midgley.auto.data.models.ForecastPayload(
+                currentBasePrice = 4.12,
+                predictedPricePerGal = 4.20
+            )
+        )
+        val forecast = repository.transformCombinedToForecast(combined, "tulsa")
+        assertThat(forecast.basePrice).isEqualTo(4.12)
+        assertThat(forecast.forecast).hasSize(6)
+        // Ensure no synthetic confidence bands were fabricated (Issue #15)
+        for (point in forecast.forecast) {
+            assertThat(point.p10).isNull()
+            assertThat(point.p90).isNull()
+        }
     }
 }

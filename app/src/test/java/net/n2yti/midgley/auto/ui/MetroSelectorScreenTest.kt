@@ -32,7 +32,7 @@ class MetroSelectorScreenTest {
     }
 
     @Test
-    fun testOnGetTemplate_returnsListTemplateWithAutoDetectAndMetros() {
+    fun testOnGetTemplate_returnsListTemplateWithAutoDetectAndRegionalGroupings() {
         screenController.moveToState(Lifecycle.State.RESUMED)
 
         val template = screen.onGetTemplate()
@@ -41,11 +41,45 @@ class MetroSelectorScreenTest {
         val listTemplate = template as ListTemplate
         val list = listTemplate.singleList
         assertThat(list).isNotNull()
-        assertThat(list?.items).isNotEmpty()
+        assertThat(list?.items).hasSize(4)
 
         // First item is Auto-Detect
         val firstItem = list?.items?.get(0) as? Row
         assertThat(firstItem).isNotNull()
         assertThat(firstItem?.title?.toString()).contains("Auto-Detect")
+
+        // Subsequent items are regional groups
+        val atlanticItem = list?.items?.get(1) as? Row
+        assertThat(atlanticItem?.title?.toString()).contains("Atlantic & Southeast")
+
+        val midwestItem = list?.items?.get(2) as? Row
+        assertThat(midwestItem?.title?.toString()).contains("Midwest & Central")
+
+        val westItem = list?.items?.get(3) as? Row
+        assertThat(westItem?.title?.toString()).contains("West Coast & National")
+    }
+
+    @Test
+    fun testSubMetroSelectorScreen_rendersAllHubsInGroup() {
+        val subScreen = SubMetroSelectorScreen(
+            carContext = carContext,
+            groupTitle = "Atlantic & Southeast",
+            hubIds = MetroSelectorScreen.ATLANTIC_HUBS,
+            preferenceManager = preferenceManager,
+            onSelectionChanged = {}
+        )
+        val subController = ScreenController(subScreen)
+        subController.moveToState(Lifecycle.State.RESUMED)
+
+        val template = subScreen.onGetTemplate() as ListTemplate
+        val items = template.singleList?.items
+        assertThat(items).isNotNull()
+        assertThat(items).hasSize(4) // Newark, Greenville, Charlotte, Port St. Lucie
+
+        val titles = items?.map { (it as Row).title?.toString() } ?: emptyList()
+        assertThat(titles.any { it.contains("Newark") }).isTrue()
+        assertThat(titles.any { it.contains("Greenville") }).isTrue()
+        assertThat(titles.any { it.contains("Charlotte") }).isTrue()
+        assertThat(titles.any { it.contains("Port St. Lucie") }).isTrue()
     }
 }

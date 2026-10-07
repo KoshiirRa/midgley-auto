@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.xmlpull.v1.XmlPullParser
@@ -71,5 +72,12 @@ class CarAppManifestRegistrationTest {
         )
         val minCarApiLevel = appInfo.metaData.getInt("androidx.car.app.minCarApiLevel")
         assertThat(minCarApiLevel).isAtLeast(1)
+    }
+
+    @Test
+    fun testCreateHostValidator_returnsNonNullValidator() {
+        val service = Robolectric.buildService(MidgleyCarAppService::class.java).create().get()
+        val validator = service.createHostValidator()
+        assertThat(validator).isNotNull()
     }
 }

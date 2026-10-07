@@ -99,6 +99,7 @@ The application implements a 3-tier gateway selector configured via `MetroPrefer
   - `MetroPreferenceManagerTest`: Validates gateway URL switching and metro persistence.
 
 * **Build & Release Protocol:**
-  1. Build APK on `dev-vm`: `./gradlew assembleDebug`
-  2. Copy APK to sync worktree: `scp marty@10.42.42.54:/home/marty/projects/midgley-auto/app/build/outputs/apk/debug/app-debug.apk midgley-auto-vX.Y.Z-debug.apk`
-  3. Publish GitHub Release: `gh release create vX.Y.Z midgley-auto-vX.Y.Z-debug.apk --title "vX.Y.Z Release" --notes "..."`
+  1. Build Release APK on `dev-vm`: `./gradlew assembleRelease` (or `./gradlew bundleRelease` for Play Store AAB)
+  2. Verify R8 shrinking and manifest configuration: inspect `app/build/outputs/mapping/release/` and release APK
+  3. Copy release APK: `scp marty@10.42.42.54:/home/marty/projects/midgley-auto/app/build/outputs/apk/release/app-release.apk midgley-auto-vX.Y.Z.apk`
+  4. Publish GitHub Release: `gh release create vX.Y.Z midgley-auto-vX.Y.Z.apk --title "vX.Y.Z Release" --notes "..."`

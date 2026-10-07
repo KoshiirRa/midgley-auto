@@ -1,8 +1,10 @@
 package net.n2yti.midgley.auto.data.repository
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import net.n2yti.midgley.auto.data.api.ApiClientFactory
 import net.n2yti.midgley.auto.data.api.MidgleyApiService
 import net.n2yti.midgley.auto.data.models.CombinedApiResponse
@@ -16,8 +18,8 @@ import net.n2yti.midgley.auto.data.preferences.MetroPreferenceManager
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Resilient Repository coordinating unified API requests across GitHub Pages static feeds
- * and dynamic API gateways, with 6-hour offline caching and low-fuel overrides.
+ * Repository orchestrating live fuel prices, ECM price trajectory models,
+ * OBD-II telemetry shortfall metrics, and in-dash fuel advice.
  */
 class MidgleyRepository(
     private val customApiService: MidgleyApiService? = null,
@@ -25,8 +27,8 @@ class MidgleyRepository(
 ) {
 
     companion object {
-        const val STALE_CACHE_THRESHOLD_HOURS = 6.0
-        private const val MILLIS_PER_HOUR = 3600000.0
+        const val CACHE_EXPIRATION_HOURS = 6.0
+        const val MILLIS_PER_HOUR = 3600000.0
 
         fun isStaticHost(url: String): Boolean {
             return url.contains("github.io") || url.contains("github.com") || url.contains("raw.githubusercontent.com")
@@ -85,32 +87,35 @@ class MidgleyRepository(
                 val effectiveUrl = baseUrl ?: MetroPreferenceManager.DEFAULT_PROD_URL
                 if (isStaticHost(effectiveUrl)) {
                     val cleanBase = if (effectiveUrl.endsWith("/")) effectiveUrl else "$effectiveUrl/"
-                    val staticUrl = "${cleanBase}api/v1/combined_${locale}.json"
+                    val cleanLocale = if (locale.equals("bay_area", ignoreCase = true)) "oakland" else locale
+                    val staticUrl = "${cleanBase}api/v1/combined_${cleanLocale}.json"
                     service.getCombinedByUrl(staticUrl)
                 } else {
                     service.getCombined(locale = locale, zipCode = zipCode)
                 }
             }
 
-            val advisor = transformCombinedToAdvisor(combined, locale, tankCapacity, fuelLevelPct)
+            val advisor = transformCombinedToAdvisor(
+                combined = combined,
+                locale = locale,
+                tankCapacity = tankCapacity,
+                fuelLevelPct = fuelLevelPct
+            )
+
             advisorCache[cacheKey] = CachedEntry(advisor)
             emit(Resource.Success(advisor, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
             Log.e("MidgleyRepo", "Failed to fetch unified advisor for $locale: ${e.message}", e)
             if (cached != null) {
-                val advisorWithFlag = cached.data.copy(
-                    isCached = true,
-                    cacheAgeHours = cached.ageHours
-                )
                 emit(
                     Resource.Success(
-                        data = advisorWithFlag,
+                        data = cached.data.copy(isCached = true, cacheAgeHours = cached.ageHours),
                         isCached = true,
                         cacheAgeHours = cached.ageHours
                     )
                 )
             } else {
-                // Synthesize graceful offline fallback recommendation based on known regional baseline
+                // Return honest offline fallback without fabricating false ground truth prices (Issue #15)
                 val fallback = generateOfflineFallbackAdvisor(locale, tankCapacity, fuelLevelPct)
                 emit(
                     Resource.Error(
@@ -122,7 +127,7 @@ class MidgleyRepository(
                 )
             }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Fetches 5-day out-of-time retail forecast with offline caching.
@@ -146,7 +151,8 @@ class MidgleyRepository(
                 val effectiveUrl = baseUrl ?: MetroPreferenceManager.DEFAULT_PROD_URL
                 if (isStaticHost(effectiveUrl)) {
                     val cleanBase = if (effectiveUrl.endsWith("/")) effectiveUrl else "$effectiveUrl/"
-                    val staticUrl = "${cleanBase}api/v1/combined_${locationId}.json"
+                    val cleanLocale = if (locationId.equals("bay_area", ignoreCase = true)) "oakland" else locationId
+                    val staticUrl = "${cleanBase}api/v1/combined_${cleanLocale}.json"
                     val combined = service.getCombinedByUrl(staticUrl)
                     transformCombinedToForecast(combined, locationId)
                 } else {
@@ -164,7 +170,7 @@ class MidgleyRepository(
                 emit(Resource.Error(e.localizedMessage ?: "Forecast service unavailable"))
             }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Resolves current GPS coordinates to nearest refining hub.
@@ -180,26 +186,46 @@ class MidgleyRepository(
 
         try {
             val service = getService()
-            val resolved = service.resolveLocation(lat, lon)
+            val baseUrl = getActiveBaseUrl()
+
+            val resolved = if (customApiService != null && baseUrl == null) {
+                service.resolveLocation(lat, lon)
+            } else {
+                val effectiveUrl = baseUrl ?: MetroPreferenceManager.DEFAULT_PROD_URL
+                if (isStaticHost(effectiveUrl)) {
+                    val local = net.n2yti.midgley.auto.data.location.MetroLocationResolver.resolve(lat, lon)
+                    LocationResolveResponse(
+                        locationId = local.id,
+                        locationName = local.name,
+                        state = local.padd,
+                        padd = local.padd,
+                        distanceKm = local.distanceKm
+                    )
+                } else {
+                    service.resolveLocation(lat, lon)
+                }
+            }
+
             locationCache[cacheKey] = CachedEntry(resolved)
-            emit(Resource.Success(resolved))
+            emit(Resource.Success(resolved, isCached = false, cacheAgeHours = 0.0))
         } catch (e: Exception) {
-            Log.e("MidgleyRepo", "Failed to resolve location ($lat, $lon): ${e.message}", e)
+            Log.e("MidgleyRepo", "Failed to resolve GPS coordinates: ${e.message}", e)
             if (cached != null) {
                 emit(Resource.Success(cached.data, isCached = true, cacheAgeHours = cached.ageHours))
             } else {
-                // Fallback to nearest deterministic metro
+                // Local geodesic fallback resolver
+                val local = net.n2yti.midgley.auto.data.location.MetroLocationResolver.resolve(lat, lon)
                 val fallback = LocationResolveResponse(
-                    locationId = "tulsa",
-                    locationName = "Tulsa Metro Area (Default)",
-                    state = "OK",
-                    padd = "PADD 2 (Midwest)",
-                    distanceKm = 0.0
+                    locationId = local.id,
+                    locationName = local.name,
+                    state = local.padd,
+                    padd = local.padd,
+                    distanceKm = local.distanceKm
                 )
-                emit(Resource.Success(fallback, isCached = true))
+                emit(Resource.Success(fallback, isCached = true, cacheAgeHours = 0.0))
             }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     fun transformCombinedToAdvisor(
         combined: CombinedApiResponse,
@@ -207,100 +233,103 @@ class MidgleyRepository(
         tankCapacity: Double,
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
-        val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 4.01
+        val currentPrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 0.0
         val targetPrice = combined.forecast?.predictedPricePerGal ?: combined.forecast?.day3Price ?: currentPrice
 
         val delta = if (combined.forecast?.expectedChangeDollars != null) {
-            if (combined.forecast.projectedDirection?.equals("DOWN", ignoreCase = true) == true) {
-                -Math.abs(combined.forecast.expectedChangeDollars)
-            } else if (combined.forecast.projectedDirection?.equals("UP", ignoreCase = true) == true) {
-                Math.abs(combined.forecast.expectedChangeDollars)
-            } else {
-                combined.forecast.expectedChangeDollars
-            }
+            combined.forecast.expectedChangeDollars
         } else {
             targetPrice - currentPrice
         }
 
-        val savingsPerGal = if (delta < 0) -delta else 0.0
+        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
 
-        // Calculate dynamic shortfall gallons needed to fill up
-        val effectiveShortfallGallons = if (fuelLevelPct != null) {
-            val clampedPct = fuelLevelPct.coerceIn(0.0, 100.0)
-            val fuelGallons = (clampedPct / 100.0) * tankCapacity
-            (tankCapacity - fuelGallons).coerceAtLeast(0.0)
+        val shortfallGallons = if (fuelLevelPct != null) {
+            ((100.0 - fuelLevelPct) / 100.0) * tankCapacity
         } else {
             tankCapacity
         }
 
-        val netSavings = savingsPerGal * effectiveShortfallGallons
+        val code: RecommendationCode
+        val signal: String
+        val optimalDay: Int
+        val optimalDate: String
+        val savingsPerGal: Double
 
-        // Safety override if tank is in low-fuel reserve (< 15%)
-        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
-
-        val (code, signal, timingText) = when {
-            isLowFuel -> Triple(
-                RecommendationCode.FILL_NOW,
-                "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP NOW",
-                "Reserve Alert: Fill Up Immediately (< 15%)"
-            )
-            delta <= -0.04 -> Triple(
-                RecommendationCode.WAIT_TO_FILL,
-                "🟢 WAIT TO FILL UP",
-                "Projected Trough (Day 3)"
-            )
-            delta >= 0.04 -> Triple(
-                RecommendationCode.FILL_NOW,
-                "🔴 FILL UP TODAY",
-                "Spike Imminent: Fill Up Now"
-            )
-            else -> Triple(
-                RecommendationCode.STABLE,
-                "🟡 PRICES STABLE",
-                "Stable Window: Refuel as needed"
-            )
+        if (isLowFuel) {
+            code = RecommendationCode.FILL_NOW
+            signal = "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP NOW"
+            optimalDay = 0
+            optimalDate = "Reserve Alert: Fill Up Now"
+            savingsPerGal = 0.0
+        } else if (delta <= -0.03) {
+            code = RecommendationCode.WAIT_TO_FILL
+            signal = "🟢 WAIT TO FILL • TROUGH AHEAD"
+            optimalDay = combined.forecast?.forecastHorizonDays ?: 3
+            optimalDate = combined.forecast?.targetDate ?: "Optimal Timing: Day $optimalDay"
+            savingsPerGal = -delta
+        } else if (delta >= 0.03) {
+            code = RecommendationCode.FILL_NOW
+            signal = "🔴 FILL UP TODAY • PRICES RISING"
+            optimalDay = 0
+            optimalDate = "Price Spike Anticipated: Fill Now"
+            savingsPerGal = delta
+        } else {
+            code = RecommendationCode.STABLE
+            signal = "🟡 PRICES STABLE • NORMAL FILL"
+            optimalDay = 0
+            optimalDate = "Market Conditions Stable"
+            savingsPerGal = 0.0
         }
+
+        val netSavings = savingsPerGal * shortfallGallons
+
+        val confidence = if (combined.forecast?.directionalHitRateHistorical != null) {
+            val hitRate = combined.forecast.directionalHitRateHistorical
+            if (hitRate >= 0.70) "HIGH" else if (hitRate >= 0.50) "MEDIUM" else "LOW"
+        } else "MEDIUM"
 
         return SavingsAdvisorResponse(
             locationId = locale,
             recommendationCode = code,
             displaySignal = signal,
-            optimalDay = if (isLowFuel) 0 else 3,
-            optimalDate = timingText,
+            optimalDay = optimalDay,
+            optimalDate = optimalDate,
             currentPriceGal = currentPrice,
             targetPriceGal = targetPrice,
             savingsPerGal = savingsPerGal,
             netTankSavingsUsd = netSavings,
-            confidenceLevel = "HIGH",
+            confidenceLevel = confidence,
             isCached = false,
             cacheAgeHours = 0.0
         )
     }
 
     fun transformCombinedToForecast(combined: CombinedApiResponse, locale: String): ForecastResponse {
-        val basePrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 4.01
+        val basePrice = combined.liveLookup?.currentPricePerGal ?: combined.forecast?.currentBasePrice ?: 0.0
         val fc = combined.forecast
         val delta = fc?.expectedChangeDollars ?: 0.0
-        val p1 = fc?.day1Price ?: (basePrice + delta * 0.2)
-        val p2 = fc?.day2Price ?: (basePrice + delta * 0.4)
-        val p3 = fc?.day3Price ?: (basePrice + delta * 0.6)
-        val p4 = fc?.day4Price ?: (basePrice + delta * 0.8)
-        val p5 = fc?.day5Price ?: fc?.predictedPricePerGal ?: (basePrice + delta)
+        val p1 = fc?.day1Price ?: (if (basePrice > 0) basePrice + delta * 0.2 else 0.0)
+        val p2 = fc?.day2Price ?: (if (basePrice > 0) basePrice + delta * 0.4 else 0.0)
+        val p3 = fc?.day3Price ?: (if (basePrice > 0) basePrice + delta * 0.6 else 0.0)
+        val p4 = fc?.day4Price ?: (if (basePrice > 0) basePrice + delta * 0.8 else 0.0)
+        val p5 = fc?.day5Price ?: fc?.predictedPricePerGal ?: (if (basePrice > 0) basePrice + delta else 0.0)
 
+        // Point-in-time integrity: do not fabricate synthetic CI bands (Issue #15)
         val points = listOf(
-            ForecastDayPoint(0, "Today", basePrice, basePrice - 0.04, basePrice + 0.04),
-            ForecastDayPoint(1, "Tomorrow", p1, p1 - 0.04, p1 + 0.04),
-            ForecastDayPoint(2, "Day 2", p2, p2 - 0.05, p2 + 0.05),
-            ForecastDayPoint(3, "Day 3", p3, p3 - 0.06, p3 + 0.06),
-            ForecastDayPoint(4, "Day 4", p4, p4 - 0.07, p4 + 0.07),
-            ForecastDayPoint(5, "Day 5", p5, p5 - 0.08, p5 + 0.08)
+            ForecastDayPoint(0, "Today", basePrice, null, null),
+            ForecastDayPoint(1, "Tomorrow", p1, null, null),
+            ForecastDayPoint(2, "Day 2", p2, null, null),
+            ForecastDayPoint(3, "Day 3", p3, null, null),
+            ForecastDayPoint(4, "Day 4", p4, null, null),
+            ForecastDayPoint(5, "Day 5", p5, null, null)
         )
         return ForecastResponse(
             locationId = locale,
             asOfTimestamp = combined.timestamp.ifEmpty { "Live Model Stream" },
             basePrice = basePrice,
             forecast = points,
-            directionalTrend = fc?.projectedDirection ?: "UP"
+            directionalTrend = fc?.projectedDirection ?: "FLAT"
         )
     }
 
@@ -309,32 +338,21 @@ class MidgleyRepository(
         tankCapacity: Double,
         fuelLevelPct: Double? = null
     ): SavingsAdvisorResponse {
-        val basePrice = when (locale.lowercase()) {
-            "oakland", "bayarea", "sanfrancisco", "sanjose", "northbay" -> 6.13
-            "port_st_lucie" -> 4.31
-            "newark" -> 4.36
-            "cincinnati" -> 4.50
-            "greenville" -> 4.16
-            "charlotte" -> 4.22
-            "tulsa" -> 4.01
-            else -> 4.15
-        }
-
         val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
         val signal = if (isLowFuel) {
-            "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP (Offline)"
+            "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP NOW (Offline)"
         } else {
-            "🟡 PRICES STABLE (Offline)"
+            "🟡 OFFLINE • FEED UNAVAILABLE"
         }
 
         return SavingsAdvisorResponse(
             locationId = locale,
-            recommendationCode = if (isLowFuel) RecommendationCode.FILL_NOW else RecommendationCode.STABLE,
+            recommendationCode = if (isLowFuel) RecommendationCode.FILL_NOW else RecommendationCode.UNKNOWN,
             displaySignal = signal,
             optimalDay = 0,
-            optimalDate = if (isLowFuel) "Reserve Alert: Fill Up Now" else "Current Baseline",
-            currentPriceGal = basePrice,
-            targetPriceGal = basePrice,
+            optimalDate = if (isLowFuel) "Reserve Alert: Fill Up Now" else "Offline • Reconnect to sync",
+            currentPriceGal = 0.0,
+            targetPriceGal = 0.0,
             savingsPerGal = 0.0,
             netTankSavingsUsd = 0.0,
             confidenceLevel = "OFFLINE_ESTIMATE",

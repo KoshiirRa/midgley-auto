@@ -12,20 +12,37 @@ android {
     defaultConfig {
         applicationId = "net.n2yti.midgley.auto"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 13
-        versionName = "1.1.2"
+        targetSdk = 35
+        versionCode = 14
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val keyStorePath = System.getenv("MIDGLEY_RELEASE_KEYSTORE")
+            if (!keyStorePath.isNullOrEmpty() && file(keyStorePath).exists()) {
+                storeFile = file(keyStorePath)
+                storePassword = System.getenv("MIDGLEY_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MIDGLEY_KEY_ALIAS")
+                keyPassword = System.getenv("MIDGLEY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
             buildConfigField("String", "BASE_URL", "\"https://koshiirra.github.io/midgley/\"")
         }
         debug {
