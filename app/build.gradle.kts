@@ -27,6 +27,15 @@ android {
                 storePassword = System.getenv("MIDGLEY_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("MIDGLEY_KEY_ALIAS")
                 keyPassword = System.getenv("MIDGLEY_KEY_PASSWORD")
+            } else {
+                // Fallback to local keystore so release build is signed and installable
+                val debugKeystore = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                if (debugKeystore.exists()) {
+                    storeFile = debugKeystore
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
             }
         }
     }
