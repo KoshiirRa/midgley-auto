@@ -67,11 +67,14 @@ object MetroLocationResolver {
             )
         }
 
-        // 3. Find closest hub by Haversine distance
+        // 3. Find closest non-CARB hub by Haversine distance
         var nearestHub = HUBS.first()
         var minDistance = Double.MAX_VALUE
 
         for (hub in HUBS) {
+            // CARB hub is strictly dedicated to California (Step 1) to prevent out-of-state drivers mapping to CARB pricing (Issue #16)
+            if (hub.id == "oakland") continue
+
             val dist = computeHaversineKm(lat, lon, hub.lat, hub.lon)
             if (dist < minDistance) {
                 minDistance = dist

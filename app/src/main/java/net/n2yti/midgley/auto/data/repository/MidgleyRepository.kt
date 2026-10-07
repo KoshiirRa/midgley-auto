@@ -237,49 +237,53 @@ class MidgleyRepository(
         val targetPrice = combined.forecast?.predictedPricePerGal ?: combined.forecast?.day3Price ?: currentPrice
 
         val delta = if (combined.forecast?.expectedChangeDollars != null) {
-            combined.forecast.expectedChangeDollars
+            if (combined.forecast.projectedDirection?.equals("DOWN", ignoreCase = true) == true) {
+                -Math.abs(combined.forecast.expectedChangeDollars)
+            } else if (combined.forecast.projectedDirection?.equals("UP", ignoreCase = true) == true) {
+                Math.abs(combined.forecast.expectedChangeDollars)
+            } else {
+                combined.forecast.expectedChangeDollars
+            }
         } else {
             targetPrice - currentPrice
         }
 
-        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
+        val savingsPerGal = if (delta < 0) -delta else 0.0
 
         val shortfallGallons = if (fuelLevelPct != null) {
-            ((100.0 - fuelLevelPct) / 100.0) * tankCapacity
+            val clamped = fuelLevelPct.coerceIn(0.0, 100.0)
+            ((100.0 - clamped) / 100.0) * tankCapacity
         } else {
             tankCapacity
         }
+
+        val isLowFuel = fuelLevelPct != null && fuelLevelPct < Obd2PidDecoder.LOW_FUEL_THRESHOLD_PERCENT
 
         val code: RecommendationCode
         val signal: String
         val optimalDay: Int
         val optimalDate: String
-        val savingsPerGal: Double
 
         if (isLowFuel) {
             code = RecommendationCode.FILL_NOW
             signal = "🔴 LOW FUEL (${fuelLevelPct!!.toInt()}%) • FILL UP NOW"
             optimalDay = 0
             optimalDate = "Reserve Alert: Fill Up Now"
-            savingsPerGal = 0.0
-        } else if (delta <= -0.03) {
+        } else if (delta <= -0.04) {
             code = RecommendationCode.WAIT_TO_FILL
-            signal = "🟢 WAIT TO FILL • TROUGH AHEAD"
+            signal = "🟢 WAIT TO FILL UP • TROUGH AHEAD"
             optimalDay = combined.forecast?.forecastHorizonDays ?: 3
             optimalDate = combined.forecast?.targetDate ?: "Optimal Timing: Day $optimalDay"
-            savingsPerGal = -delta
-        } else if (delta >= 0.03) {
+        } else if (delta >= 0.04) {
             code = RecommendationCode.FILL_NOW
             signal = "🔴 FILL UP TODAY • PRICES RISING"
             optimalDay = 0
             optimalDate = "Price Spike Anticipated: Fill Now"
-            savingsPerGal = delta
         } else {
             code = RecommendationCode.STABLE
             signal = "🟡 PRICES STABLE • NORMAL FILL"
             optimalDay = 0
             optimalDate = "Market Conditions Stable"
-            savingsPerGal = 0.0
         }
 
         val netSavings = savingsPerGal * shortfallGallons
