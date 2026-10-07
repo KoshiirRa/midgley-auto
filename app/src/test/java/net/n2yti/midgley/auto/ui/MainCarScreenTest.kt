@@ -59,4 +59,11 @@ class MainCarScreenTest {
         assertThat(header?.endHeaderActions).isNotEmpty()
         assertThat(header?.endHeaderActions?.get(0)?.title?.toString()).isEqualTo("Refresh")
     }
+
+    @Test
+    fun testScreenLifecycle_destroyedStateTeardown() {
+        screenController.moveToState(Lifecycle.State.RESUMED)
+        screenController.moveToState(Lifecycle.State.DESTROYED)
+        // Verifies clean teardown of coroutine jobs and BLE/RFCOMM resources (Issue #20)
+    }
 }

@@ -45,8 +45,9 @@ class MetroPreferenceManager(context: Context) {
             MetroHub("tulsa", "Tulsa Metro Area", "PADD 2 • Cushing WTI / West Tulsa"),
             MetroHub("newark", "Newark Metro Area", "PADD 1B • Delaware City Detour"),
             MetroHub("cincinnati", "Cincinnati Tri-State", "PADD 2 • Ohio/Miss River Barges"),
-            MetroHub("greenville", "Greenville & Charlotte", "PADD 1C • Colonial Pipeline"),
-            MetroHub("oakland", "Oakland & SF Bay Area", "PADD 5 • CARB / Richmond"),
+            MetroHub("greenville", "Greenville Metro Area", "PADD 1C • Colonial Pipeline Lines 1 & 2"),
+            MetroHub("charlotte", "Charlotte Metro Area", "PADD 1C • Colonial Pipeline Paw Creek Junction"),
+            MetroHub("oakland", "SF Bay Area & Oakland", "PADD 5 • CARB / Richmond"),
             MetroHub("port_st_lucie", "Port St. Lucie", "PADD 1C • Waterborne Terminals"),
             MetroHub("national", "National Average", "US National Baseline")
         )
@@ -159,12 +160,14 @@ class MetroPreferenceManager(context: Context) {
     }
 
     fun getDisplayName(localeId: String): String {
-        return SUPPORTED_METROS.find { it.id.equals(localeId, ignoreCase = true) }?.name
+        val normalized = if (localeId.equals("bay_area", ignoreCase = true)) "oakland" else localeId
+        return SUPPORTED_METROS.find { it.id.equals(normalized, ignoreCase = true) }?.name
             ?: localeId.replaceFirstChar { it.uppercase() }
     }
 
     fun getDescription(localeId: String): String {
-        return SUPPORTED_METROS.find { it.id.equals(localeId, ignoreCase = true) }?.description
+        val normalized = if (localeId.equals("bay_area", ignoreCase = true)) "oakland" else localeId
+        return SUPPORTED_METROS.find { it.id.equals(normalized, ignoreCase = true) }?.description
             ?: "Refining Hub"
     }
 }

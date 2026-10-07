@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Allowed hosts for Android Auto in production releases (Issue #14) -->
+    <string-array name="hosts_allowlist">
+        <!-- Android Auto companion app -->
+        <item>com.google.android.projection.gearhead</item>
+        <!-- Android Automotive OS System UI & Car App Host -->
+        <item>com.android.car.carlauncher</item>
+        <item>com.google.android.apps.automotive.carlauncher</item>
+        <item>com.google.android.apps.automotive.templates.host</item>
+    </string-array>
+</resources>

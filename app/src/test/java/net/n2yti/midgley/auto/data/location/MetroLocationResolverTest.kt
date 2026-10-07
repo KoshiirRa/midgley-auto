@@ -37,6 +37,14 @@ class MetroLocationResolverTest {
     }
 
     @Test
+    fun testResolve_charlotteCoordinates() {
+        val resolved = MetroLocationResolver.resolve(35.2271, -80.8431)
+        assertThat(resolved.id).isEqualTo("charlotte")
+        assertThat(resolved.padd).contains("PADD 1C")
+        assertThat(resolved.isExactMetro).isTrue()
+    }
+
+    @Test
     fun testResolve_oaklandCoordinates() {
         val resolved = MetroLocationResolver.resolve(37.8044, -122.2712)
         assertThat(resolved.id).isEqualTo("oakland")
@@ -51,6 +59,30 @@ class MetroLocationResolverTest {
         assertThat(resolved.id).isEqualTo("oakland")
         assertThat(resolved.name).contains("CARB")
         assertThat(resolved.padd).contains("PADD 5")
+    }
+
+    @Test
+    fun testResolve_renoNevada_doesNotMapToCaliforniaCARB() {
+        // Reno, NV (39.5296, -119.8138) must NOT be captured by California bounding box (Issue #16)
+        val resolved = MetroLocationResolver.resolve(39.5296, -119.8138)
+        assertThat(resolved.id).isNotEqualTo("oakland")
+        assertThat(resolved.name).doesNotContain("CARB")
+    }
+
+    @Test
+    fun testResolve_lasVegasNevada_doesNotMapToCaliforniaCARB() {
+        // Las Vegas, NV (36.1699, -115.1398) must NOT be captured by California bounding box (Issue #16)
+        val resolved = MetroLocationResolver.resolve(36.1699, -115.1398)
+        assertThat(resolved.id).isNotEqualTo("oakland")
+        assertThat(resolved.name).doesNotContain("CARB")
+    }
+
+    @Test
+    fun testResolve_lakeHavasuArizona_doesNotMapToCaliforniaCARB() {
+        // Lake Havasu City, AZ (34.4839, -114.3224) must NOT be captured by California bounding box (Issue #16)
+        val resolved = MetroLocationResolver.resolve(34.4839, -114.3224)
+        assertThat(resolved.id).isNotEqualTo("oakland")
+        assertThat(resolved.name).doesNotContain("CARB")
     }
 
     @Test

@@ -413,6 +413,7 @@ class Obd2BleManager(
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        mainHandler.removeCallbacksAndMessages(null)
         stopScan()
         classicJob?.cancel()
         classicJob = null

@@ -8,24 +8,25 @@ import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import net.n2yti.midgley.auto.data.models.ForecastDayPoint
 import net.n2yti.midgley.auto.data.models.ForecastResponse
 import net.n2yti.midgley.auto.data.repository.MidgleyRepository
 import net.n2yti.midgley.auto.data.repository.Resource
 
 /**
- * In-dash 5-day out-of-time price forecast breakdown matrix.
+ * Screen displaying the 5-day predictive trajectory with point-in-time calibrated intervals.
  */
 class ForecastDetailScreen(
     carContext: CarContext,
-    private val localeId: String = "tulsa",
-    private val localeName: String = "Tulsa Metro Area",
+    private val localeId: String,
+    private val localeName: String,
     private val repository: MidgleyRepository = MidgleyRepository()
-) : Screen(carContext) {
+) : Screen(carContext), DefaultLifecycleObserver {
 
     private var forecastData: ForecastResponse? = null
     private var isLoading: Boolean = true
@@ -33,10 +34,17 @@ class ForecastDetailScreen(
     private var fetchJob: Job? = null
 
     init {
+        lifecycle.addObserver(this)
         loadForecast()
     }
 
-    fun loadForecast() {
+    override fun onDestroy(owner: LifecycleOwner) {
+        fetchJob?.cancel()
+        fetchJob = null
+        super.onDestroy(owner)
+    }
+
+    private fun loadForecast() {
         fetchJob?.cancel()
         fetchJob = repository.get5DayForecast(localeId)
             .onEach { resource ->
@@ -55,10 +63,6 @@ class ForecastDetailScreen(
                     is Resource.Error -> {
                         isLoading = false
                         errorMessage = resource.message
-                        if (forecastData == null) {
-                            // Synthesize fallback 5-day trajectory for offline safety
-                            forecastData = generateFallbackForecast()
-                        }
                         invalidate()
                     }
                 }
@@ -75,12 +79,12 @@ class ForecastDetailScreen(
             val points = data.forecast.take(6)
             for (point in points) {
                 val dayLabel = if (point.day == 0) "Today (Baseline)" else "Day ${point.day} • ${point.date}"
-                val priceText = "$%.2f/gal".format(point.p50)
+                val priceText = if (point.p50 > 0.0) "$%.2f/gal".format(point.p50) else "Pending"
                 val spreadText = if (point.p10 != null && point.p90 != null) {
-                    " (Range: $%.2f - $%.2f)".format(point.p10, point.p90)
+                    " (90% CI: $%.2f - $%.2f)".format(point.p10, point.p90)
                 } else ""
 
-                val deltaText = if (point.day > 0) {
+                val deltaText = if (point.day > 0 && data.basePrice > 0.0 && point.p50 > 0.0) {
                     val delta = point.p50 - data.basePrice
                     val sign = if (delta >= 0) "+" else ""
                     " | %s$%.2f vs today".format(sign, delta)
@@ -94,9 +98,19 @@ class ForecastDetailScreen(
                 listBuilder.addItem(row)
             }
         } else {
+            val errorTitle = if (isLoading) {
+                "Loading 5-Day Forecast..."
+            } else {
+                "Forecast Unavailable Offline"
+            }
+            val errorSubtitle = if (isLoading) {
+                "Connecting to Midgley Multi-Agent Engine..."
+            } else {
+                errorMessage ?: "Connect to network to sync 5-day market trajectory"
+            }
             val loadingRow = Row.Builder()
-                .setTitle(if (isLoading) "Loading 5-Day Forecast..." else (errorMessage ?: "Forecast Unavailable"))
-                .addText("Connecting to Midgley Multi-Agent Engine...")
+                .setTitle(errorTitle)
+                .addText(errorSubtitle)
                 .build()
             listBuilder.addItem(loadingRow)
         }
@@ -110,24 +124,5 @@ class ForecastDetailScreen(
             .setHeader(header)
             .setSingleList(listBuilder.build())
             .build()
-    }
-
-    private fun generateFallbackForecast(): ForecastResponse {
-        val base = 3.89
-        val points = listOf(
-            ForecastDayPoint(0, "Today", base, base - 0.04, base + 0.04),
-            ForecastDayPoint(1, "Tomorrow", base - 0.02, base - 0.06, base + 0.02),
-            ForecastDayPoint(2, "Day 2", base - 0.05, base - 0.09, base - 0.01),
-            ForecastDayPoint(3, "Day 3 (Trough)", base - 0.10, base - 0.14, base - 0.06),
-            ForecastDayPoint(4, "Day 4", base - 0.07, base - 0.11, base - 0.03),
-            ForecastDayPoint(5, "Day 5", base - 0.04, base - 0.08, base + 0.01)
-        )
-        return ForecastResponse(
-            locationId = localeId,
-            asOfTimestamp = "Offline Mode",
-            basePrice = base,
-            forecast = points,
-            directionalTrend = "TROUGH_DAY_3"
-        )
     }
 }

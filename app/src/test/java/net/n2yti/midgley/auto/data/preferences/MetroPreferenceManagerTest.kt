@@ -89,4 +89,14 @@ class MetroPreferenceManagerTest {
         preferenceManager.setLastObd2Address("00:11:22:33:44:55")
         assertThat(preferenceManager.getLastObd2Address()).isEqualTo("00:11:22:33:44:55")
     }
+
+    @Test
+    fun testSupportedMetros_containsAllEightHubs() {
+        val hubIds = MetroPreferenceManager.SUPPORTED_METROS.map { it.id }
+        assertThat(hubIds).containsExactly(
+            "tulsa", "newark", "cincinnati", "greenville", "charlotte", "oakland", "port_st_lucie", "national"
+        )
+        assertThat(preferenceManager.getDisplayName("charlotte")).contains("Charlotte")
+        assertThat(preferenceManager.getDisplayName("bay_area")).contains("Oakland")
+    }
 }
