@@ -25,7 +25,7 @@ class ForecastDetailScreen(
     carContext: CarContext,
     private val localeId: String,
     private val localeName: String,
-    private val repository: MidgleyRepository
+    private val repository: MidgleyRepository = MidgleyRepository()
 ) : Screen(carContext), DefaultLifecycleObserver {
 
     private var forecastData: ForecastResponse? = null

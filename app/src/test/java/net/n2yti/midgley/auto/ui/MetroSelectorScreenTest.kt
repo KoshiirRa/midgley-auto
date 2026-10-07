@@ -76,7 +76,7 @@ class MetroSelectorScreenTest {
         assertThat(items).isNotNull()
         assertThat(items).hasSize(4) // Newark, Greenville, Charlotte, Port St. Lucie
 
-        val titles = items?.map { (it as Row).title?.toString() } ?: emptyList()
+        val titles = items?.mapNotNull { (it as? Row)?.title?.toString() } ?: emptyList()
         assertThat(titles.any { it.contains("Newark") }).isTrue()
         assertThat(titles.any { it.contains("Greenville") }).isTrue()
         assertThat(titles.any { it.contains("Charlotte") }).isTrue()
